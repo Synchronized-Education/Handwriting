@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncEdu - Pro Handwrite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Desain Kertas */
+        .paper-base {
+            background-color: #fff;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+        
+        /* Garis Buku Tulis */
+        .lines-notebook {
+            background-image: linear-gradient(#e5e7eb 1px, transparent 1px);
+            background-size: 100% 1.6rem;
+        }
+
+        /* Garis Folio */
+        .lines-folio {
+            background-image: linear-gradient(#d1d5db 1px, transparent 1px);
+            background-size: 100% 2.2rem;
+            border-left: 2px solid #fca5a5; /* Garis pinggir merah folio */
+            margin-left: 40px;
+        }
+
+        /* Efek Tinta Tulisan */
+        #outputHandwriting {
+            font-family: 'Courier New', cursive; /* Fallback */
+            line-height: 1.6rem;
+            color: #1e3a8a; /* Warna tinta biru navy */
+            mix-blend-mode: multiply; /* KUNCI: Membuat background foto hilang */
+            filter: contrast(150%) brightness(90%);
+        }
+
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.2s;
+        }
+        .upload-area:hover { border-color: #3b82f6; background: #eff6ff; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4">
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- KOLOM INPUT (4/12) -->
+        <div class="lg:col-span-4 space-y-6">
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                <h1 class="text-2xl font-black text-blue-600 italic mb-6 uppercase tracking-tighter">Handwrite AI</h1>
+                
+                <div class="space-y-4">
+                    <!-- Step 1: Foto -->
+                    <div>
+                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">1. Foto Tulisan Tangan</label>
+                        <div class="upload-area rounded-2xl p-4 text-center cursor-pointer mt-1">
+                            <input type="file" id="handImgInput" accept="image/*" class="hidden">
+                            <label for="handImgInput" class="cursor-pointer">
+                                <div id="previewThumb" class="w-full h-20 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs">
+                                    Klik untuk Ambil Foto / Galeri
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Kertas -->
+                    <div>
+                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">2. Jenis Kertas & Ukuran</label>
+                        <select id="selectPaper" class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm">
+                            <option value="none">HVS Putih Polos</option>
+                            <option value="notebook">Buku Tulis (Sidu)</option>
+                            <option value="folio">Double Folio</option>
+                            <option value="binder">Kertas Binder (Dots)</option>
+                        </select>
+                    </div>
+
+                    <!-- Step 3: Teks -->
+                    <div>
+                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">3. Isi Tulisan</label>
+                        <textarea id="textInput" rows="8" class="w-full mt-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ketik apa saja yang ingin diubah menjadi tulisan tangan..."></textarea>
+                    </div>
+
+                    <button id="btnGenerate" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all">
+                        Generate & Gabungkan
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- KOLOM PREVIEW (8/12) -->
+        <div class="lg:col-span-8 flex flex-col items-center">
+            <div id="paperSheet" class="paper-base w-full max-w-[595px] aspect-[1/1.41] p-12 transition-all">
+                <div id="paperLineDecorator" class="absolute inset-0 pointer-events-none"></div>
+                
+                <!-- Area Teks Utama -->
+                <div id="outputHandwriting" class="relative z-10 w-full h-full whitespace-pre-wrap break-words outline-none" contenteditable="true">
+                    Teks anda akan muncul di sini dengan gaya tulisan tangan...
+                </div>
+            </div>
+
+            <div class="flex gap-4 mt-6">
+                <button onclick="window.print()" class="bg-slate-800 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-black transition">Cetak / Simpan PDF</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const handImgInput = document.getElementById('handImgInput');
+        const previewThumb = document.getElementById('previewThumb');
+        const btnGenerate = document.getElementById('btnGenerate');
+        const textInput = document.getElementById('textInput');
+        const output = document.getElementById('outputHandwriting');
+        const paperLineDecorator = document.getElementById('paperLineDecorator');
+        const paperSheet = document.getElementById('paperSheet');
+
+        // Handle Upload Foto & Preview
+        handImgInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    previewThumb.innerHTML = `<img src="${event.target.result}" class="h-full mx-auto rounded-md shadow-sm">`;
+                    // Logika: Kita gunakan gambar ini sebagai 'Masking' atau referensi warna tinta
+                    output.style.color = "transparent";
+                    output.style.backgroundImage = `url(${event.target.result})`;
+                    output.style.webkitBackgroundClip = "text";
+                    output.style.backgroundSize = "200px"; // Tekstur tulisan
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Handle Ganti Kertas
+        document.getElementById('selectPaper').addEventListener('change', function(e) {
+            paperLineDecorator.className = "absolute inset-0 pointer-events-none";
+            output.style.marginTop = "0";
+            
+            if(e.target.value === 'notebook') {
+                paperLineDecorator.classList.add('lines-notebook');
+                output.style.lineHeight = "1.6rem";
+            } else if(e.target.value === 'folio') {
+                paperLineDecorator.classList.add('lines-folio');
+                output.style.lineHeight = "2.2rem";
+                output.style.marginTop = "0.5rem";
+            } else if(e.target.value === 'binder') {
+                paperSheet.style.backgroundImage = "radial-gradient(#e5e7eb 1.5px, transparent 1.5px)";
+                paperSheet.style.backgroundSize = "1.6rem 1.6rem";
+            } else {
+                paperSheet.style.backgroundImage = "none";
+            }
+        });
+
+        // Tombol Generate
+        btnGenerate.addEventListener('click', () => {
+            const val = textInput.value;
+            if(!val) return alert("Masukkan teks dulu!");
+            
+            btnGenerate.innerText = "Processing...";
+            
+            setTimeout(() => {
+                output.innerText = val;
+                // Memberikan sedikit variasi agar tidak terlalu kaku
+                output.style.transform = `rotate(${Math.random() * 0.4 - 0.2}deg)`;
+                btnGenerate.innerText = "Generate & Gabungkan";
+            }, 800);
+        });
+    </script>
+</body>
+</html>
