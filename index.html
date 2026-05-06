@@ -3,171 +3,174 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyncEdu - Pro Handwrite</title>
+    <title>Handwrite AI - SyncEdu</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Desain Kertas */
         .paper-base {
             background-color: #fff;
             position: relative;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.15);
-            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            min-height: 842px; /* A4 Ratio */
         }
-        
-        /* Garis Buku Tulis */
         .lines-notebook {
             background-image: linear-gradient(#e5e7eb 1px, transparent 1px);
             background-size: 100% 1.6rem;
         }
-
-        /* Garis Folio */
         .lines-folio {
             background-image: linear-gradient(#d1d5db 1px, transparent 1px);
             background-size: 100% 2.2rem;
-            border-left: 2px solid #fca5a5; /* Garis pinggir merah folio */
-            margin-left: 40px;
+            border-left: 2px solid #fca5a5;
+            padding-left: 10px;
         }
-
-        /* Efek Tinta Tulisan */
         #outputHandwriting {
-            font-family: 'Courier New', cursive; /* Fallback */
+            font-family: 'Courier New', cursive;
             line-height: 1.6rem;
-            color: #1e3a8a; /* Warna tinta biru navy */
-            mix-blend-mode: multiply; /* KUNCI: Membuat background foto hilang */
-            filter: contrast(150%) brightness(90%);
+            color: #1e3a8a;
+            mix-blend-mode: multiply;
+            filter: contrast(120%) brightness(90%);
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
-
-        .upload-area {
-            border: 2px dashed #cbd5e1;
-            transition: all 0.2s;
+        @media print {
+            body * { visibility: hidden; }
+            #paperSheet, #paperSheet * { visibility: visible; }
+            #paperSheet { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none; }
         }
-        .upload-area:hover { border-color: #3b82f6; background: #eff6ff; }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen p-4">
+<body class="bg-slate-50 min-h-screen">
 
-    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div class="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        <!-- KOLOM INPUT (4/12) -->
-        <div class="lg:col-span-4 space-y-6">
+        <!-- PANEL KONTROL -->
+        <div class="lg:col-span-4 space-y-4">
             <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                <h1 class="text-2xl font-black text-blue-600 italic mb-6 uppercase tracking-tighter">Handwrite AI</h1>
+                <h1 class="text-xl font-black text-blue-600 mb-6 uppercase">Handwrite AI</h1>
                 
                 <div class="space-y-4">
-                    <!-- Step 1: Foto -->
+                    <!-- Upload -->
                     <div>
-                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">1. Foto Tulisan Tangan</label>
-                        <div class="upload-area rounded-2xl p-4 text-center cursor-pointer mt-1">
-                            <input type="file" id="handImgInput" accept="image/*" class="hidden">
-                            <label for="handImgInput" class="cursor-pointer">
-                                <div id="previewThumb" class="w-full h-20 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs">
-                                    Klik untuk Ambil Foto / Galeri
-                                </div>
-                            </label>
-                        </div>
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">1. Foto Tulisan Anda</label>
+                        <input type="file" id="handImgInput" accept="image/*" capture="camera" class="block w-full text-xs mt-1 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-blue-50 file:text-blue-700">
                     </div>
 
-                    <!-- Step 2: Kertas -->
+                    <!-- Kertas -->
                     <div>
-                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">2. Jenis Kertas & Ukuran</label>
-                        <select id="selectPaper" class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">2. Jenis Kertas</label>
+                        <select id="selectPaper" class="w-full mt-1 p-2 bg-slate-50 border rounded-lg text-sm">
                             <option value="none">HVS Putih Polos</option>
-                            <option value="notebook">Buku Tulis (Sidu)</option>
+                            <option value="notebook">Buku Tulis Bergaris</option>
                             <option value="folio">Double Folio</option>
-                            <option value="binder">Kertas Binder (Dots)</option>
                         </select>
                     </div>
 
-                    <!-- Step 3: Teks -->
+                    <!-- Teks -->
                     <div>
-                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">3. Isi Tulisan</label>
-                        <textarea id="textInput" rows="8" class="w-full mt-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ketik apa saja yang ingin diubah menjadi tulisan tangan..."></textarea>
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">3. Isi Teks</label>
+                        <textarea id="textInput" rows="6" class="w-full mt-1 p-3 bg-slate-50 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ketik tugas di sini..."></textarea>
                     </div>
 
-                    <button id="btnGenerate" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all">
-                        Generate & Gabungkan
+                    <button id="btnGenerate" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold uppercase text-sm shadow-md hover:bg-blue-700 transition">
+                        Generate & Save to Firebase
                     </button>
                 </div>
             </div>
         </div>
 
-        <!-- KOLOM PREVIEW (8/12) -->
+        <!-- AREA PREVIEW -->
         <div class="lg:col-span-8 flex flex-col items-center">
-            <div id="paperSheet" class="paper-base w-full max-w-[595px] aspect-[1/1.41] p-12 transition-all">
+            <div id="paperSheet" class="paper-base w-full p-12 transition-all">
                 <div id="paperLineDecorator" class="absolute inset-0 pointer-events-none"></div>
-                
-                <!-- Area Teks Utama -->
-                <div id="outputHandwriting" class="relative z-10 w-full h-full whitespace-pre-wrap break-words outline-none" contenteditable="true">
-                    Teks anda akan muncul di sini dengan gaya tulisan tangan...
+                <div id="outputHandwriting" class="relative z-10 w-full h-full outline-none" contenteditable="true">
+                    Hasil akan muncul di sini...
                 </div>
             </div>
-
-            <div class="flex gap-4 mt-6">
-                <button onclick="window.print()" class="bg-slate-800 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-black transition">Cetak / Simpan PDF</button>
+            <div class="mt-4 flex gap-2">
+                <button onclick="window.print()" class="bg-slate-800 text-white px-6 py-2 rounded-full text-sm font-bold">Cetak / Simpan PDF</button>
             </div>
         </div>
-
     </div>
 
-    <script>
+    <!-- FIREBASE & LOGIC -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Konfigurasi Firebase Anda
+        const firebaseConfig = {
+            apiKey: "AIzaSyBQp9Olce8JK6Y8DmjJo8zkR_1XJri8Yco",
+            authDomain: "farhan-34b24.firebaseapp.com",
+            projectId: "farhan-34b24",
+            storageBucket: "farhan-34b24.firebasestorage.app",
+            messagingSenderId: "692021812815",
+            appId: "1:692021812815:web:60cf37c47d6cb06dd6543a"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const storage = getStorage(app);
+        const db = getFirestore(app);
+
         const handImgInput = document.getElementById('handImgInput');
-        const previewThumb = document.getElementById('previewThumb');
         const btnGenerate = document.getElementById('btnGenerate');
         const textInput = document.getElementById('textInput');
         const output = document.getElementById('outputHandwriting');
         const paperLineDecorator = document.getElementById('paperLineDecorator');
-        const paperSheet = document.getElementById('paperSheet');
 
-        // Handle Upload Foto & Preview
-        handImgInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
+        let selectedFile = null;
+
+        // Preview Foto & Handle File
+        handImgInput.addEventListener('change', (e) => {
+            selectedFile = e.target.files[0];
+            if (selectedFile) {
                 const reader = new FileReader();
-                reader.onload = function(event) {
-                    previewThumb.innerHTML = `<img src="${event.target.result}" class="h-full mx-auto rounded-md shadow-sm">`;
-                    // Logika: Kita gunakan gambar ini sebagai 'Masking' atau referensi warna tinta
-                    output.style.color = "transparent";
+                reader.onload = (event) => {
                     output.style.backgroundImage = `url(${event.target.result})`;
                     output.style.webkitBackgroundClip = "text";
-                    output.style.backgroundSize = "200px"; // Tekstur tulisan
-                }
-                reader.readAsDataURL(file);
+                    output.style.backgroundSize = "250px";
+                };
+                reader.readAsDataURL(selectedFile);
             }
         });
 
-        // Handle Ganti Kertas
-        document.getElementById('selectPaper').addEventListener('change', function(e) {
+        // Ganti Kertas
+        document.getElementById('selectPaper').addEventListener('change', (e) => {
             paperLineDecorator.className = "absolute inset-0 pointer-events-none";
-            output.style.marginTop = "0";
-            
-            if(e.target.value === 'notebook') {
-                paperLineDecorator.classList.add('lines-notebook');
-                output.style.lineHeight = "1.6rem";
-            } else if(e.target.value === 'folio') {
-                paperLineDecorator.classList.add('lines-folio');
-                output.style.lineHeight = "2.2rem";
-                output.style.marginTop = "0.5rem";
-            } else if(e.target.value === 'binder') {
-                paperSheet.style.backgroundImage = "radial-gradient(#e5e7eb 1.5px, transparent 1.5px)";
-                paperSheet.style.backgroundSize = "1.6rem 1.6rem";
-            } else {
-                paperSheet.style.backgroundImage = "none";
-            }
+            if(e.target.value === 'notebook') paperLineDecorator.classList.add('lines-notebook');
+            if(e.target.value === 'folio') paperLineDecorator.classList.add('lines-folio');
         });
 
-        // Tombol Generate
-        btnGenerate.addEventListener('click', () => {
-            const val = textInput.value;
-            if(!val) return alert("Masukkan teks dulu!");
-            
-            btnGenerate.innerText = "Processing...";
-            
-            setTimeout(() => {
-                output.innerText = val;
-                // Memberikan sedikit variasi agar tidak terlalu kaku
-                output.style.transform = `rotate(${Math.random() * 0.4 - 0.2}deg)`;
-                btnGenerate.innerText = "Generate & Gabungkan";
-            }, 800);
+        // Generate & Firebase Upload
+        btnGenerate.addEventListener('click', async () => {
+            const text = textInput.value;
+            if(!text) return alert("Isi teks dulu!");
+
+            output.innerText = text;
+            btnGenerate.disabled = true;
+            btnGenerate.innerText = "Uploading to Firebase...";
+
+            try {
+                let photoUrl = "";
+                if(selectedFile) {
+                    const storageRef = ref(storage, `uploads/${Date.now()}_${selectedFile.name}`);
+                    await uploadBytes(storageRef, selectedFile);
+                    photoUrl = await getDownloadURL(storageRef);
+                }
+
+                await addDoc(collection(db, "tugas_tulisan"), {
+                    content: text,
+                    imageUrl: photoUrl,
+                    timestamp: new Date()
+                });
+
+                alert("Berhasil disimpan ke Firebase!");
+            } catch (err) {
+                console.error(err);
+                alert("Gagal simpan ke Firebase. Cek console.");
+            } finally {
+                btnGenerate.disabled = false;
+                btnGenerate.innerText = "Generate & Save to Firebase";
+            }
         });
     </script>
 </body>
