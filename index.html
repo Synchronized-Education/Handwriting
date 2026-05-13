@@ -226,15 +226,15 @@
                 questionsBuffer = [...questionsBuffer, ...generated];
                 document.getElementById('q-count').innerText = questionsBuffer.length;
                 alert("5 Soal Berhasil Dibuat!");
-            
-            } catch (e) {
-                console.error("Detail Error:", e);
-                alert("Gagal AI: " + e.message);
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }
-         };
+        
+        } catch (e) {
+            console.error("Detail Error:", e);
+            alert("Gagal AI: " + e.message);
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+        };
         // --- STUDENT LOGIC: LOAD & SUBMIT ---
         window.findExams = async () => {
             const teacherId = document.getElementById('student-teacher-id').value;
