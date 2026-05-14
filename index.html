@@ -1716,8 +1716,8 @@
             fb.classList.remove('hidden');
             setTimeout(() => fb.classList.add('hidden'), 1000);
         }
-
-        function tampilkanHasil() {
+        
+        async function tampilkanHasil() {
             document.getElementById('um-kerjakan').classList.add('hidden');
             document.getElementById('um-hasil').classList.remove('hidden');
 
@@ -1744,7 +1744,6 @@
 
             setTimeout(() => {
                 circle.style.strokeDashoffset = offset;
-                // Animasi counter angka
                 let cur = 0;
                 const interval = setInterval(() => {
                     cur = Math.min(cur + 2, skor);
@@ -1766,13 +1765,13 @@
                 predikat.style.color = '#ca8a04';
             }
 
-            cconst quoteEl = document.getElementById('um-quote');
+            // === QUOTE DARI INTERNET ===
+            const quoteEl = document.getElementById('um-quote');
             quoteEl.innerHTML = `<i class="fas fa-spinner fa-spin text-gray-400"></i> Mengambil kata motivasi...`;
-            
+
             const quote = await fetchMotivationalQuote();
             quoteEl.innerHTML = `"${quote.q}"<br><b class="text-gray-700">— ${quote.by}</b>`;
         }
-
         function resetUjianMandiri() {
             umSoalBuffer = [];
             umJawaban = [];
