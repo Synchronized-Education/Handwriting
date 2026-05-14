@@ -31,7 +31,9 @@
         const db = getFirestore(app);
         const provider = new GoogleAuthProvider();
 
-        const geminiApiKey = "AIzaSyDzkdsP3OAMdz46S1RdQJKTXC5K_fuNUGE"; 
+        const geminiApiKey = "46S1RdQJKTXC5K_fuNUGE";
+        window.__geminiKey = geminiApiKey;
+        window.__geminiKeyUM = geminiApiKey; 
 
         // State Management
         let currentUser = null;
@@ -60,7 +62,32 @@
             }
         };
 
-        window.loginMurid = async () => {
+        window.loginMuridGoogle = async () => {
+            try {
+                const result = await signInWithPopup(auth, provider);
+                const user = result.user;
+                // Simpan email murid, tapi jangan masuk sebagai guru
+                localStorage.setItem('studentEmail', user.email);
+                localStorage.setItem('studentGoogleName', user.displayName);
+                // Isi otomatis nama murid
+                const nameInput = document.getElementById('student-name');
+                if (nameInput && !nameInput.value) nameInput.value = user.displayName;
+                // Tampilkan form
+                document.getElementById('murid-form').classList.remove('hidden');
+                document.getElementById('murid-google-hint').classList.remove('hidden');
+                // Sign out dari auth Firebase agar tidak masuk sebagai guru
+                await signOut(auth);
+            } catch (e) {
+                alert("Gagal login Google: " + e.message);
+            }
+        };
+
+        window.openUjianMandiri = () => {
+            document.getElementById('ujian-mandiri-modal').classList.remove('hidden');
+        };
+        window.closeUjianMandiri = () => {
+            document.getElementById('ujian-mandiri-modal').classList.add('hidden');
+        };
             const idSoal = document.getElementById('student-teacher-id').value.trim();
             const namaMurid = document.getElementById('student-name').value.trim();
             if (!idSoal || !namaMurid) return alert("Isi Nama Lengkap dan ID Soal!");
@@ -353,6 +380,7 @@
                 publishId: currentActiveExam.publishId || '',
                 teacherId: currentActiveExam.teacherId,
                 studentName: studentName,
+                studentEmail: localStorage.getItem('studentEmail') || '',
                 answers: answers,
                 timestamp: serverTimestamp(),
                 dateStr: new Date().toISOString().split('T')[0],
@@ -411,13 +439,14 @@
 
                 tr.innerHTML = `
                     ${checkboxCell}
-                    <td class="p-3">${sub.studentName || '-'}</td>
-                    <td class="p-3 text-xs text-gray-500">${sub.subject || '-'}</td>
-                    <td class="p-3">${sub.examTitle || '-'}</td>
-                    <td class="p-3 text-center">${sub.answers?.length || 0}</td>
-                    <td class="p-3 text-sm">${sub.dateStr || ''}<br><span class="text-xs text-gray-400">${sub.timeStr || ''}</span></td>
-                    <td class="p-3 text-center font-bold ${sub.score > 0 ? 'text-blue-600' : 'text-gray-400'}">${sub.score || '-'}</td>
-                    <td class="p-3">
+                    <td class="p-3 border border-gray-200 font-medium text-gray-900">${sub.studentName || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-xs text-gray-700">${sub.studentEmail || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-gray-900">${sub.subject || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-gray-900">${sub.examTitle || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-center text-gray-900">${sub.answers?.length || 0}</td>
+                    <td class="p-3 border border-gray-200 text-sm text-gray-900">${sub.dateStr || ''}<br><span class="text-xs text-gray-600">${sub.timeStr || ''}</span></td>
+                    <td class="p-3 border border-gray-200 text-center font-bold ${sub.score >= 75 ? 'text-green-600' : sub.score >= 50 ? 'text-yellow-600' : sub.score > 0 ? 'text-red-500' : 'text-gray-400'}">${sub.score || '-'}</td>
+                    <td class="p-3 border border-gray-200">
                         ${(!deleteMode && !printMode) ? `
                         <button onclick="inspectSubmission('${sub.id}')" class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-sm hover:bg-indigo-200">
                             Periksa
@@ -519,31 +548,46 @@
             const appId = "edu-exam-2026";
             try {
                 const selectedSubs = allSubmissionsCache.filter(s => selectedSubmissions.has(s.id));
-                let printContent = `<html><head><style>
-                    body{font-family:Arial;padding:30px;}
-                    .page-break{page-break-after:always;}
-                    table{width:100%;border-collapse:collapse;}
-                    td,th{border:1px solid #ccc;padding:8px;}
-                    h2{color:#1a56db;}
+                let printContent = `<html><head><title>Hasil Jawaban Murid</title><style>
+                    @media print { @page { margin: 2cm; } }
+                    body { font-family: Arial, sans-serif; padding: 30px; color: #000; }
+                    .page-break { page-break-after: always; }
+                    .judul { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; }
+                    .info-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; }
+                    .info-table td { padding: 4px 8px; font-size: 14px; }
+                    .info-table td:first-child { width: 160px; font-weight: bold; }
+                    .dotted { border-bottom: 1px dotted #000; display: inline-block; min-width: 200px; }
+                    hr { border: 1px solid #000; margin: 16px 0; }
+                    .jawaban-item { margin-bottom: 14px; padding: 8px 12px; border-left: 4px solid #999; font-size: 14px; }
+                    .benar { border-left-color: green; }
+                    .salah { border-left-color: red; }
+                    .nilai-hijau { color: green; font-weight: bold; font-size: 18px; }
+                    .nilai-kuning { color: #b45309; font-weight: bold; font-size: 18px; }
+                    .nilai-merah { color: red; font-weight: bold; font-size: 18px; }
                 </style></head><body>`;
 
                 for (const sub of selectedSubs) {
                     const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', sub.examId);
                     const examSnap = await getDoc(examRef);
                     const examData = examSnap.exists() ? examSnap.data() : null;
+                    const score = sub.score || 0;
+                    const nilaiClass = score >= 75 ? 'nilai-hijau' : score >= 50 ? 'nilai-kuning' : 'nilai-merah';
+                    const judulClass = score >= 75 ? 'color:green' : score >= 50 ? 'color:#b45309' : 'color:red';
 
                     printContent += `
                         <div class="page-break">
-                            <h2>Hasil Jawaban Murid - EduSmart 2026</h2>
-                            <table>
-                                <tr><td><b>Nama Murid</b></td><td>${sub.studentName}</td></tr>
-                                <tr><td><b>Mata Pelajaran</b></td><td>${sub.subject || '-'}</td></tr>
-                                <tr><td><b>Judul Soal</b></td><td>${sub.examTitle}</td></tr>
-                                <tr><td><b>Tanggal</b></td><td>${sub.dateStr} ${sub.timeStr}</td></tr>
-                                <tr><td><b>Nilai</b></td><td>${sub.score || 'Belum dinilai'}</td></tr>
+                            <div class="judul" style="${sub.score ? judulClass : ''}">Hasil Jawaban Murid</div>
+                            <table class="info-table">
+                                <tr><td>Nama</td><td>: <span class="dotted"></span></td></tr>
+                                <tr><td>Tanggal</td><td>: <span class="dotted"></span></td></tr>
+                                <tr><td>Mata Pelajaran</td><td>: ${sub.subject || '-'}</td></tr>
+                                <tr><td>Kelas</td><td>: ${examData?.grade || sub.grade || '-'}</td></tr>
+                                <tr><td>Soal</td><td>: ${sub.examTitle}</td></tr>
+                                ${sub.publishId ? `<tr><td>ID Soal</td><td>: ${sub.publishId}</td></tr>` : ''}
+                                <tr><td>Nilai</td><td>: <span class="${nilaiClass}">${sub.score || 'Belum dinilai'}</span></td></tr>
                             </table>
-                            <br>
-                            <h3>Detail Jawaban:</h3>`;
+                            <hr>
+                            <p style="font-weight:bold;margin-bottom:8px;">Detail Jawaban:</p>`;
 
                     if (examData) {
                         examData.questions.forEach((q, i) => {
@@ -552,7 +596,7 @@
                             const correct = q.type === 'pg' ? q.options[q.correctIndex] : '-';
                             const isCorrect = q.type === 'pg' ? ans === q.correctIndex : null;
                             printContent += `
-                                <div style="margin-bottom:12px;padding:8px;border-left:3px solid ${isCorrect === true ? 'green' : isCorrect === false ? 'red' : '#999'}">
+                                <div class="jawaban-item ${isCorrect === true ? 'benar' : isCorrect === false ? 'salah' : ''}">
                                     <p><b>${i+1}. ${q.text}</b></p>
                                     <p>Jawaban: <b>${studentAns}</b></p>
                                     ${q.type === 'pg' ? `<p>Kunci: <b>${correct}</b></p>` : ''}
@@ -560,7 +604,7 @@
                         });
                     } else {
                         sub.answers.forEach((ans, i) => {
-                            printContent += `<p>${i+1}. ${ans || 'Tidak dijawab'}</p>`;
+                            printContent += `<div class="jawaban-item"><p>${i+1}. ${ans || 'Tidak dijawab'}</p></div>`;
                         });
                     }
                     printContent += `</div>`;
@@ -695,17 +739,34 @@
                     const isCorrect = studentAns === q.correctIndex;
                     if(isCorrect) autoScore++;
                     qDiv.innerHTML = `
-                        <p class="font-semibold">${i+1}. ${q.text}</p>
-                        <p class="text-sm">Jawaban Murid: <span class="${isCorrect ? 'text-green-600' : 'text-red-600'} font-bold">${q.options[studentAns] || 'Tidak dijawab'}</span></p>
-                        <p class="text-xs text-gray-500">Kunci: ${q.options[q.correctIndex]}</p>
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="font-semibold">${i+1}. ${q.text}</p>
+                                <p class="text-sm mt-1">Jawaban Murid: <span class="${isCorrect ? 'text-green-600' : 'text-red-600'} font-bold">${q.options[studentAns] || 'Tidak dijawab'}</span></p>
+                                <p class="text-xs text-gray-500">Kunci: ${q.options[q.correctIndex]}</p>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <span class="px-3 py-1 rounded-full text-xs font-bold ${isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                    ${isCorrect ? '✓ BENAR' : '✗ SALAH'}
+                                </span>
+                            </div>
+                        </div>
                     `;
                 } else {
                     qDiv.innerHTML = `
                         <p class="font-semibold">${i+1}. ${q.text}</p>
-                        <p class="bg-yellow-50 p-2 text-sm italic">"${studentAns || 'Tidak ada jawaban'}"</p>
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-xs">Beri Nilai (0-100):</span>
-                            <input type="number" id="manual-score-${i}" class="w-16 p-1 border rounded" value="0">
+                        <p class="bg-blue-50 p-2 text-sm italic text-blue-700 rounded">"${studentAns || 'Tidak ada jawaban'}"</p>
+                        <div class="mt-3 flex items-center gap-4 flex-wrap">
+                            <label class="flex items-center gap-2 cursor-pointer px-3 py-1.5 border-2 border-green-400 rounded-lg hover:bg-green-50">
+                                <input type="radio" name="essay-verdict-${i}" value="benar" class="accent-green-600">
+                                <span class="text-green-700 font-bold text-sm">BENAR</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer px-3 py-1.5 border-2 border-red-400 rounded-lg hover:bg-red-50">
+                                <input type="radio" name="essay-verdict-${i}" value="salah" class="accent-red-600">
+                                <span class="text-red-700 font-bold text-sm">SALAH</span>
+                            </label>
+                            <span class="text-xs text-gray-400 ml-2">atau beri nilai manual:</span>
+                            <input type="number" id="manual-score-${i}" class="w-16 p-1 border rounded" value="0" min="0" max="100">
                         </div>
                     `;
                 }
@@ -720,8 +781,17 @@
                 let manualCount = 0;
                 examData.questions.forEach((q, i) => {
                     if (q.type === 'essay') {
-                        manualTotal += parseInt(document.getElementById(`manual-score-${i}`)?.value || 0);
                         manualCount++;
+                        // Cek verdict Benar/Salah dulu
+                        const verdict = document.querySelector(`input[name="essay-verdict-${i}"]:checked`)?.value;
+                        if (verdict === 'benar') {
+                            manualTotal += 100;
+                        } else if (verdict === 'salah') {
+                            manualTotal += 0;
+                        } else {
+                            // Pakai nilai manual jika tidak pilih benar/salah
+                            manualTotal += parseInt(document.getElementById(`manual-score-${i}`)?.value || 0);
+                        }
                     }
                 });
                 let finalScore = 0;
@@ -783,24 +853,43 @@
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', id);
             const snap = await getDoc(docRef);
             const data = snap.data();
-            let printContent = `<div style="font-family: Arial; padding: 40px;">
-                <h1 style="text-align: center;">LEMBAR SOAL UJIAN</h1>
-                <p>Mata Pelajaran: ${data.subject} | Kelas: ${data.grade}</p>
-                <p>Judul: ${data.title}</p>
-                ${data.publishId ? `<p>ID Soal: ${data.publishId}</p>` : ''}
+            let printContent = `<html><head><title>Lembar Soal</title><style>
+                @media print { @page { margin: 2cm; } }
+                body { font-family: Arial, sans-serif; padding: 40px; color: #000; }
+                h1 { text-align: center; font-size: 20px; margin-bottom: 20px; text-transform: uppercase; }
+                .info-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; }
+                .info-table td { padding: 4px 8px; font-size: 14px; }
+                .info-table td:first-child { width: 160px; font-weight: bold; }
+                .dotted { border-bottom: 1px dotted #000; display: inline-block; min-width: 200px; }
+                hr { border: 1px solid #000; margin: 16px 0; }
+                .soal { margin-bottom: 20px; }
+                .soal p { margin: 4px 0; font-size: 14px; }
+                .jawaban-kosong { border: 1px solid #999; height: 80px; width: 100%; margin-top: 6px; }
+                ul { list-style: none; padding-left: 20px; margin: 4px 0; }
+                ul li { margin: 3px 0; font-size: 14px; }
+            </style></head><body>
+                <h1>Lembar Soal Ujian</h1>
+                <table class="info-table">
+                    <tr><td>Nama</td><td>: <span class="dotted"></span></td></tr>
+                    <tr><td>Tanggal</td><td>: <span class="dotted"></span></td></tr>
+                    <tr><td>Mata Pelajaran</td><td>: ${data.subject}</td></tr>
+                    <tr><td>Soal</td><td>: ${data.title}</td></tr>
+                    <tr><td>Kelas</td><td>: ${data.grade}</td></tr>
+                    ${data.publishId ? `<tr><td>ID Soal</td><td>: ${data.publishId}</td></tr>` : ''}
+                </table>
                 <hr>
                 ${data.questions.map((q, i) => `
-                    <div style="margin-bottom: 20px;">
+                    <div class="soal">
                         <p><b>${i+1}. ${q.text}</b></p>
-                        ${q.type === 'pg' ? `<ul style="list-style-type: none;">
+                        ${q.type === 'pg' ? `<ul>
                             <li>A. ${q.options[0]}</li>
                             <li>B. ${q.options[1]}</li>
                             <li>C. ${q.options[2]}</li>
                             <li>D. ${q.options[3]}</li>
-                        </ul>` : '<div style="height: 100px; border: 1px solid #ccc; width: 100%;"></div>'}
+                        </ul>` : '<div class="jawaban-kosong"></div>'}
                     </div>
                 `).join('')}
-            </div>`;
+            </body></html>`;
             const win = window.open('', '_blank');
             win.document.write(printContent);
             win.document.close();
@@ -894,16 +983,25 @@
     <div id="login-screen" class="min-h-screen flex items-center justify-center p-6">
         <div class="max-w-4xl w-full grid md:grid-cols-2 gap-8 bg-white rounded-3xl shadow-2xl overflow-hidden">
             <div class="p-12 flex flex-col justify-center bg-blue-600 text-white">
-                <h1 class="text-4xl font-bold mb-4">EduSmart 2026</h1>
-                <p class="text-blue-100 text-lg mb-8">Platform Ujian Modern berbasis Merdeka Belajar dan Kecerdasan Buatan.</p>
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="bg-white p-2 rounded-xl">
+                        <i class="fas fa-graduation-cap text-blue-600 text-2xl"></i>
+                    </div>
+                    <h1 class="text-4xl font-bold">EduSmart</h1>
+                </div>
+                <p class="text-blue-100 text-lg mb-8">Solusi cerdas untuk ujian digital yang efisien, akurat, dan terpercaya.</p>
                 <div class="space-y-4">
                     <div class="flex items-center gap-4">
-                        <i class="fas fa-check-circle text-2xl"></i>
-                        <span>Otomasi Soal dengan AI Gemini</span>
+                        <i class="fas fa-bolt text-2xl text-yellow-300"></i>
+                        <span>Buat & Distribusikan Soal dalam Hitungan Detik</span>
                     </div>
                     <div class="flex items-center gap-4">
-                        <i class="fas fa-chart-line text-2xl"></i>
-                        <span>Penilaian Akurat Versi 2026</span>
+                        <i class="fas fa-shield-alt text-2xl text-green-300"></i>
+                        <span>Penilaian Otomatis & Akurat Berbasis Data</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <i class="fas fa-users text-2xl text-purple-300"></i>
+                        <span>Pantau Seluruh Murid Secara Real-Time</span>
                     </div>
                 </div>
             </div>
@@ -920,11 +1018,33 @@
                     <hr class="border-gray-200">
                     <span class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-4 text-xs text-gray-400 uppercase tracking-widest">Atau Murid</span>
                 </div>
-                <div class="space-y-4">
-                    <input id="student-name" type="text" placeholder="Nama Lengkap Murid" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <input id="student-teacher-id" type="text" placeholder="ID Soal (Dari Guru Anda, contoh: EDU-XXXXXXXX)" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <button id="btn-masuk-ujian" onclick="loginMurid()" class="w-full bg-gray-800 text-white py-3 rounded-xl font-bold hover:bg-gray-900 transition-all">
-                        Masuk Ujian
+
+                <!-- KOTAK BIRU: Masuk Sebagai Murid -->
+                <div class="bg-blue-600 rounded-2xl p-5 mb-3">
+                    <p class="text-white font-bold text-sm mb-3 flex items-center gap-2">
+                        <i class="fas fa-user-graduate"></i> Masuk Sebagai Murid
+                    </p>
+                    <button onclick="loginMuridGoogle()" class="w-full mb-3 flex items-center justify-center gap-3 bg-white py-2.5 rounded-xl hover:bg-blue-50 transition-all font-semibold text-sm">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18">
+                        Login dengan Google
+                    </button>
+                    <div id="murid-form" class="hidden space-y-2">
+                        <input id="student-name" type="text" placeholder="Nama Lengkap Murid" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
+                        <input id="student-teacher-id" type="text" placeholder="ID Soal (Dari Guru Anda, contoh: EDU-XXXXXXXX)" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
+                        <button id="btn-masuk-ujian" onclick="loginMurid()" class="w-full bg-gray-800 text-white py-2.5 rounded-xl font-bold hover:bg-gray-900 transition-all text-sm">
+                            Masuk Ujian
+                        </button>
+                    </div>
+                    <p id="murid-google-hint" class="text-blue-100 text-xs text-center hidden">Login Google berhasil! Isi data di atas lalu klik Masuk Ujian.</p>
+                </div>
+
+                <!-- KOTAK HIJAU: Ujian Mandiri AI -->
+                <div class="bg-green-600 rounded-2xl p-5">
+                    <p class="text-white font-bold text-sm mb-3 flex items-center gap-2">
+                        <i class="fas fa-robot"></i> Ujian Mandiri AI
+                    </p>
+                    <button onclick="openUjianMandiri()" class="w-full flex items-center justify-center gap-2 bg-white text-green-700 py-2.5 rounded-xl font-bold hover:bg-green-50 transition-all text-sm">
+                        <i class="fas fa-play-circle"></i> Mulai Ujian Mandiri
                     </button>
                 </div>
             </div>
@@ -1034,7 +1154,7 @@
                             <input id="exam-title" type="text" placeholder="Judul Tugas" class="p-3 border rounded-xl w-full">
                         </div>
                         <button id="ai-btn" onclick="document.getElementById('ai-topic-modal').style.display='flex'" class="w-full bg-purple-600 text-white py-3 rounded-xl font-bold mb-6 hover:bg-purple-700 shadow-lg">
-                            <i class="fas fa-robot"></i> Buat Tugas Otomatis AI (Gemini)
+                            <i class="fas fa-robot"></i> Buat Tugas Otomatis AI
                         </button>
 
                         <div class="border-t pt-6">
@@ -1121,16 +1241,17 @@
                         </div>
 
                         <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm">
-                                <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold" id="submissions-thead">
+                            <table class="w-full text-left text-sm border border-gray-200">
+                                <thead class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200" id="submissions-thead">
                                     <tr>
-                                        <th class="p-3">Nama Murid</th>
-                                        <th class="p-3">Mata Pelajaran</th>
-                                        <th class="p-3">Judul Soal</th>
-                                        <th class="p-3 text-center">Jml Soal</th>
-                                        <th class="p-3">Waktu Pengerjaan</th>
-                                        <th class="p-3 text-center">Nilai</th>
-                                        <th class="p-3">Aksi</th>
+                                        <th class="p-3 border border-gray-200">Nama Murid</th>
+                                        <th class="p-3 border border-gray-200">Email</th>
+                                        <th class="p-3 border border-gray-200">Mata Pelajaran</th>
+                                        <th class="p-3 border border-gray-200">Judul Soal</th>
+                                        <th class="p-3 border border-gray-200 text-center">Jml Soal</th>
+                                        <th class="p-3 border border-gray-200">Waktu Pengerjaan</th>
+                                        <th class="p-3 border border-gray-200 text-center">Nilai</th>
+                                        <th class="p-3 border border-gray-200">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody id="submissions-table-body">
@@ -1278,6 +1399,373 @@
             document.getElementById('ai-topic-modal').style.display = 'none';
             document.getElementById('ai-topic-input').value = '';
             generateWithAI(topic);
+        }
+    </script>
+
+    <!-- ===== MODAL UJIAN MANDIRI AI ===== -->
+    <div id="ujian-mandiri-modal" class="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+
+            <!-- Setup Screen -->
+            <div id="um-setup" class="flex flex-col">
+                <div class="bg-green-600 p-6 text-white">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-bold flex items-center gap-2"><i class="fas fa-robot"></i> Ujian Mandiri AI</h2>
+                            <p class="text-green-100 text-sm mt-1">Buat soal otomatis sesuai tingkatan Anda</p>
+                        </div>
+                        <button onclick="closeUjianMandiri()" class="text-white/70 hover:text-white text-2xl"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="p-6 overflow-y-auto space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase mb-1 block">Nama</label>
+                            <input id="um-nama" type="text" placeholder="Nama lengkap..." class="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-green-400">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase mb-1 block">Kelas / Semester</label>
+                            <input id="um-kelas" type="text" placeholder="Contoh: 4 / Semester 1" class="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-green-400">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase mb-1 block">Tingkatan</label>
+                        <select id="um-tingkat" class="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-green-400">
+                            <option value="PAUD">PAUD</option>
+                            <option value="TK">TK</option>
+                            <option value="SD" selected>SD</option>
+                            <option value="SMP/Tsanawiyah">SMP / Tsanawiyah</option>
+                            <option value="SMA">SMA</option>
+                            <option value="SMK">SMK</option>
+                            <option value="S1/Mahasiswa">S1 / Mahasiswa</option>
+                            <option value="S2/Pascasarjana">S2 / Pascasarjana</option>
+                            <option value="S3/Doktoral">S3 / Doktoral</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase mb-1 block">Jenis Soal</label>
+                        <div class="flex gap-3">
+                            <label class="flex-1 flex items-center gap-2 p-3 border-2 rounded-xl cursor-pointer hover:border-green-400 has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
+                                <input type="radio" name="um-jenis" value="pg" checked> <span class="font-medium">Pilihan Ganda</span>
+                            </label>
+                            <label class="flex-1 flex items-center gap-2 p-3 border-2 rounded-xl cursor-pointer hover:border-green-400 has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
+                                <input type="radio" name="um-jenis" value="essay"> <span class="font-medium">Esai</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase mb-1 block">Topik / Mata Pelajaran</label>
+                        <input id="um-topik" type="text" placeholder="Contoh: Matematika - Penjumlahan..." class="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-green-400">
+                    </div>
+                </div>
+                <div class="p-6 border-t">
+                    <button onclick="generateSoalMandiri(false)" class="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2">
+                        <i class="fas fa-magic"></i> Generate 5 Soal
+                    </button>
+                </div>
+            </div>
+
+            <!-- Soal Preview Screen -->
+            <div id="um-preview" class="hidden flex-col">
+                <div class="bg-green-600 p-4 text-white flex justify-between items-center">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-list"></i> Daftar Soal</h3>
+                    <span id="um-preview-count" class="text-green-100 text-sm"></span>
+                </div>
+                <div id="um-soal-list" class="p-5 overflow-y-auto space-y-3 flex-1 max-h-80"></div>
+                <div class="p-5 border-t flex gap-3">
+                    <button onclick="generateSoalMandiri(true)" class="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 flex items-center justify-center gap-2">
+                        <i class="fas fa-plus"></i> Tambah 5 Soal
+                    </button>
+                    <button onclick="mulaiKerjakan()" class="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2">
+                        <i class="fas fa-play"></i> Kerjakan
+                    </button>
+                </div>
+            </div>
+
+            <!-- Kerjakan Screen -->
+            <div id="um-kerjakan" class="hidden flex-col">
+                <div class="bg-green-600 p-4 text-white flex justify-between items-center">
+                    <h3 class="font-bold"><i class="fas fa-pencil-alt mr-2"></i>Sedang Mengerjakan</h3>
+                    <span id="um-progress" class="text-sm text-green-100"></span>
+                </div>
+                <div id="um-soal-aktif" class="p-6 overflow-y-auto flex-1"></div>
+                <!-- Animasi feedback -->
+                <div id="um-feedback" class="hidden fixed inset-0 z-[200] flex items-center justify-center pointer-events-none">
+                    <div id="um-feedback-inner" class="text-8xl animate-bounce"></div>
+                </div>
+            </div>
+
+            <!-- Hasil Screen -->
+            <div id="um-hasil" class="hidden flex-col items-center justify-center p-8 text-center">
+                <div id="um-lingkaran-wrap" class="mb-6">
+                    <svg width="160" height="160" viewBox="0 0 160 160">
+                        <circle cx="80" cy="80" r="70" fill="none" stroke="#e5e7eb" stroke-width="12"/>
+                        <circle id="um-circle-prog" cx="80" cy="80" r="70" fill="none" stroke="#16a34a" stroke-width="12"
+                            stroke-dasharray="440" stroke-dashoffset="440"
+                            stroke-linecap="round" transform="rotate(-90 80 80)"
+                            style="transition: stroke-dashoffset 2s ease"/>
+                        <text id="um-score-text" x="80" y="88" text-anchor="middle" font-size="32" font-weight="bold" fill="#111"></text>
+                    </svg>
+                </div>
+                <h2 id="um-predikat" class="text-2xl font-bold mb-2"></h2>
+                <p id="um-quote" class="text-gray-500 italic text-sm mb-6 max-w-sm"></p>
+                <button onclick="resetUjianMandiri()" class="bg-green-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-green-700">
+                    Coba Lagi
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <style>
+        @keyframes pita { 0%{transform:scale(0) rotate(-10deg);opacity:0} 50%{transform:scale(1.2) rotate(5deg);opacity:1} 100%{transform:scale(1) rotate(0);opacity:1} }
+        .anim-pita { animation: pita 0.5s ease forwards; }
+        @keyframes kecewa { 0%{transform:scale(0);opacity:0} 40%{transform:scale(1.3);opacity:1} 70%{transform:scale(0.9)} 100%{transform:scale(1);opacity:1} }
+        .anim-kecewa { animation: kecewa 0.5s ease forwards; }
+    </style>
+
+    <script>
+        let umSoalBuffer = [];
+        let umJawaban = [];
+        let umCurrentIdx = 0;
+        let umConfig = {};
+
+        const umQuotes = {
+            default: [
+                { q: "Pendidikan adalah senjata paling kuat yang bisa kamu gunakan untuk mengubah dunia.", by: "Nelson Mandela" },
+                { q: "Belajar tanpa berpikir itu sia-sia, berpikir tanpa belajar itu berbahaya.", by: "Konfusius" },
+                { q: "Kegagalan adalah kesempatan untuk memulai lagi dengan lebih cerdas.", by: "Henry Ford" },
+                { q: "Jangan takut gagal, takutlah tidak pernah mencoba.", by: "Michael Jordan" },
+                { q: "Sukses adalah jumlah dari usaha-usaha kecil yang diulang setiap hari.", by: "Robert Collier" }
+            ],
+            muda: [
+                { q: "Masa muda adalah saat terbaik untuk belajar dan bermimpi besar!", by: "Soekarno" },
+                { q: "Bermainlah dengan sungguh-sungguh, belajarlah dengan gembira!", by: "Ki Hajar Dewantara" },
+                { q: "Anak yang rajin belajar akan menjadi bintang masa depan.", by: "Buya Hamka" }
+            ],
+            tinggi: [
+                { q: "Ilmu tanpa amal seperti pohon tanpa buah.", by: "Imam Al-Ghazali" },
+                { q: "Orang-orang yang berhenti belajar akan menjadi pemilik masa lalu. Orang-orang yang terus belajar akan menjadi pemilik masa depan.", by: "Mario Teguh" },
+                { q: "Semakin dalam kamu belajar, semakin luas dunia yang terbuka untukmu.", by: "Albert Einstein" }
+            ]
+        };
+
+        function getRandomQuote(tingkat) {
+            let pool;
+            if (['PAUD','TK','SD'].includes(tingkat)) pool = umQuotes.muda;
+            else if (['S1/Mahasiswa','S2/Pascasarjana','S3/Doktoral'].includes(tingkat)) pool = umQuotes.tinggi;
+            else pool = umQuotes.default;
+            return pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        async function generateSoalMandiri(tambah = false) {
+            const nama = document.getElementById('um-nama').value.trim();
+            const kelas = document.getElementById('um-kelas').value.trim();
+            const tingkat = document.getElementById('um-tingkat').value;
+            const jenis = document.querySelector('input[name="um-jenis"]:checked').value;
+            const topik = document.getElementById('um-topik').value.trim();
+
+            if (!nama || !kelas || !topik) return alert('Isi Nama, Kelas/Semester, dan Topik terlebih dahulu!');
+
+            umConfig = { nama, kelas, tingkat, jenis, topik };
+
+            const btn = tambah
+                ? document.querySelector('#um-preview .flex.gap-3 button:first-child')
+                : document.querySelector('#um-setup .p-6.border-t button');
+            const origText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuat soal...';
+            btn.disabled = true;
+
+            const geminiKey = document.querySelector('script[type="module"]') ? null : null;
+            // Ambil dari variabel global yang di-set di module script
+            const apiKey = window.__geminiKey || '';
+
+            try {
+                let prompt = '';
+                if (jenis === 'pg') {
+                    prompt = `Buatlah 5 soal pilihan ganda tentang "${topik}" untuk tingkat ${tingkat} kelas/semester ${kelas}. Format JSON array, setiap object: {"type":"pg","text":"...","options":["A...","B...","C...","D..."],"correctIndex":0}. RAW JSON saja.`;
+                } else {
+                    prompt = `Buatlah 5 soal esai singkat tentang "${topik}" untuk tingkat ${tingkat} kelas/semester ${kelas}. Format JSON array, setiap object: {"type":"essay","text":"...","sampleAnswer":"..."}. RAW JSON saja.`;
+                }
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${window.__geminiKeyUM || window.__geminiKey || ''}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+
+                let raw = data.candidates[0].content.parts[0].text.replace(/```json|```/g,'').trim();
+                const newSoal = JSON.parse(raw);
+                if (tambah) {
+                    umSoalBuffer = [...umSoalBuffer, ...newSoal];
+                } else {
+                    umSoalBuffer = newSoal;
+                }
+                renderPreviewSoal();
+                document.getElementById('um-setup').classList.add('hidden');
+                document.getElementById('um-preview').classList.remove('hidden');
+            } catch(e) {
+                // Jika API key belum ada, minta dulu
+                if (!window.__geminiKeyUM) {
+                    const k = prompt('Masukkan Gemini API Key untuk Ujian Mandiri AI:');
+                    if (k) { window.__geminiKeyUM = k; generateSoalMandiri(tambah); }
+                    else alert('API Key diperlukan untuk fitur ini.');
+                } else {
+                    alert('Gagal generate soal: ' + e.message);
+                }
+            } finally {
+                btn.innerHTML = origText;
+                btn.disabled = false;
+            }
+        }
+
+        function renderPreviewSoal() {
+            const list = document.getElementById('um-soal-list');
+            list.innerHTML = '';
+            document.getElementById('um-preview-count').innerText = `${umSoalBuffer.length} soal siap`;
+            umSoalBuffer.forEach((s, i) => {
+                const div = document.createElement('div');
+                div.className = 'p-3 bg-gray-50 rounded-xl border text-sm';
+                div.innerHTML = `<p class="font-semibold text-gray-700">${i+1}. ${s.text}</p>
+                    ${s.type === 'pg' ? `<p class="text-xs text-gray-400 mt-1">${s.options.join(' | ')}</p>` : '<p class="text-xs text-gray-400 mt-1">Esai</p>'}`;
+                list.appendChild(div);
+            });
+        }
+
+        function mulaiKerjakan() {
+            umJawaban = new Array(umSoalBuffer.length).fill(null);
+            umCurrentIdx = 0;
+            document.getElementById('um-preview').classList.add('hidden');
+            document.getElementById('um-kerjakan').classList.remove('hidden');
+            tampilkanSoalAktif();
+        }
+
+        function tampilkanSoalAktif() {
+            const soal = umSoalBuffer[umCurrentIdx];
+            const area = document.getElementById('um-soal-aktif');
+            document.getElementById('um-progress').innerText = `${umCurrentIdx + 1} / ${umSoalBuffer.length}`;
+            area.innerHTML = '';
+
+            const div = document.createElement('div');
+            div.className = 'space-y-3';
+
+            if (soal.type === 'pg') {
+                div.innerHTML = `<p class="font-bold text-lg mb-4">${umCurrentIdx+1}. ${soal.text}</p>`;
+                soal.options.forEach((opt, idx) => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer hover:border-green-400 transition-all';
+                    label.innerHTML = `<input type="radio" name="um-pg" value="${idx}" class="accent-green-600"> <span>${opt}</span>`;
+                    label.querySelector('input').addEventListener('change', () => {
+                        const isCorrect = idx === soal.correctIndex;
+                        umJawaban[umCurrentIdx] = idx;
+                        showFeedback(isCorrect);
+                        setTimeout(() => {
+                            if (umCurrentIdx < umSoalBuffer.length - 1) {
+                                umCurrentIdx++;
+                                tampilkanSoalAktif();
+                            } else {
+                                tampilkanHasil();
+                            }
+                        }, 1100);
+                    });
+                    div.appendChild(label);
+                });
+            } else {
+                div.innerHTML = `
+                    <p class="font-bold text-lg mb-4">${umCurrentIdx+1}. ${soal.text}</p>
+                    <textarea id="um-essay-ans" class="w-full p-3 border-2 rounded-xl outline-none focus:border-green-400" rows="5" placeholder="Tulis jawaban Anda..."></textarea>
+                    <button onclick="submitEssayMandiri()" class="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 mt-2">
+                        ${umCurrentIdx < umSoalBuffer.length - 1 ? 'Lanjut →' : 'Selesai'}
+                    </button>`;
+            }
+            area.appendChild(div);
+        }
+
+        window.submitEssayMandiri = () => {
+            const ans = document.getElementById('um-essay-ans').value.trim();
+            umJawaban[umCurrentIdx] = ans || '';
+            if (umCurrentIdx < umSoalBuffer.length - 1) {
+                umCurrentIdx++;
+                tampilkanSoalAktif();
+            } else {
+                tampilkanHasil();
+            }
+        };
+
+        function showFeedback(isCorrect) {
+            const fb = document.getElementById('um-feedback');
+            const inner = document.getElementById('um-feedback-inner');
+            inner.innerHTML = isCorrect ? '🎉' : '😢';
+            inner.className = isCorrect ? 'text-8xl anim-pita' : 'text-8xl anim-kecewa';
+            fb.classList.remove('hidden');
+            setTimeout(() => fb.classList.add('hidden'), 1000);
+        }
+
+        function tampilkanHasil() {
+            document.getElementById('um-kerjakan').classList.add('hidden');
+            document.getElementById('um-hasil').classList.remove('hidden');
+
+            // Hitung skor PG
+            let benar = 0;
+            let pgCount = 0;
+            umSoalBuffer.forEach((s, i) => {
+                if (s.type === 'pg') {
+                    pgCount++;
+                    if (umJawaban[i] === s.correctIndex) benar++;
+                }
+            });
+            const skor = pgCount > 0 ? Math.round((benar / pgCount) * 100) : 75;
+
+            // Animasi lingkaran
+            const circle = document.getElementById('um-circle-prog');
+            const scoreText = document.getElementById('um-score-text');
+            const circumference = 440;
+            const offset = circumference - (skor / 100) * circumference;
+
+            const warna = skor >= 75 ? '#16a34a' : skor >= 50 ? '#ca8a04' : '#dc2626';
+            circle.style.stroke = warna;
+            scoreText.style.fill = warna;
+
+            setTimeout(() => {
+                circle.style.strokeDashoffset = offset;
+                // Animasi counter angka
+                let cur = 0;
+                const interval = setInterval(() => {
+                    cur = Math.min(cur + 2, skor);
+                    scoreText.textContent = cur;
+                    if (cur >= skor) clearInterval(interval);
+                }, 30);
+            }, 200);
+
+            // Predikat
+            const predikat = document.getElementById('um-predikat');
+            if (skor >= 75) {
+                predikat.innerText = '🏆 Selamat Berprestasi!';
+                predikat.style.color = '#b45309';
+            } else if (skor >= 50) {
+                predikat.innerText = '💪 Semangat & Terus Berjuang!';
+                predikat.style.color = '#16a34a';
+            } else {
+                predikat.innerText = '❤️ Semangat & Jangan Menyerah!';
+                predikat.style.color = '#ca8a04';
+            }
+
+            const quote = getRandomQuote(umConfig.tingkat);
+            document.getElementById('um-quote').innerHTML = `"${quote.q}"<br><b class="text-gray-700">— ${quote.by}</b>`;
+        }
+
+        function resetUjianMandiri() {
+            umSoalBuffer = [];
+            umJawaban = [];
+            umCurrentIdx = 0;
+            document.getElementById('um-setup').classList.remove('hidden');
+            document.getElementById('um-preview').classList.add('hidden');
+            document.getElementById('um-kerjakan').classList.add('hidden');
+            document.getElementById('um-hasil').classList.add('hidden');
+            document.getElementById('um-circle-prog').style.strokeDashoffset = '440';
+            document.getElementById('um-score-text').textContent = '';
         }
     </script>
 
