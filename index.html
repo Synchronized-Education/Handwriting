@@ -1303,7 +1303,7 @@
             <div class="p-6 overflow-y-auto flex-1" id="grading-content"></div>
             <div class="p-6 bg-gray-50 border-t">
                 <button onclick="saveGrading()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700">
-                    Simpan Nilai Sesuai Kurikulum Merdeka 2026
+                    Simpan Nilai
                 </button>
             </div>
         </div>
@@ -1559,7 +1559,19 @@
             else pool = umQuotes.default;
             return pool[Math.floor(Math.random() * pool.length)];
         }
-
+        async function fetchMotivationalQuote() {
+        try {
+            const response = await fetch('https://api.quotable.io/random?tags=motivational|education|wisdom|inspirational');
+            const data = await response.json();
+            return {
+                q: data.content,
+                by: data.author
+            };
+        } catch (error) {
+            // Jika gagal, pakai quote lokal
+            return getRandomQuote(umConfig.tingkat || 'default');
+        }
+    }
         async function generateSoalMandiri(tambah = false) {
             const nama = document.getElementById('um-nama').value.trim();
             const kelas = document.getElementById('um-kelas').value.trim();
@@ -1754,8 +1766,11 @@
                 predikat.style.color = '#ca8a04';
             }
 
-            const quote = getRandomQuote(umConfig.tingkat);
-            document.getElementById('um-quote').innerHTML = `"${quote.q}"<br><b class="text-gray-700">— ${quote.by}</b>`;
+            cconst quoteEl = document.getElementById('um-quote');
+            quoteEl.innerHTML = `<i class="fas fa-spinner fa-spin text-gray-400"></i> Mengambil kata motivasi...`;
+            
+            const quote = await fetchMotivationalQuote();
+            quoteEl.innerHTML = `"${quote.q}"<br><b class="text-gray-700">— ${quote.by}</b>`;
         }
 
         function resetUjianMandiri() {
