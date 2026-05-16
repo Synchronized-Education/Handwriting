@@ -519,15 +519,84 @@
             }
         }
 
-        // --- DELETE MODE ---
+        // State untuk file delete mode (terpisah dari delete mode jawaban)
+        let fileDeleteMode = false;
+        let selectedFileSubmissions = new Set();
+
+        // Fungsi untuk deteksi tab aktif
+        function getActiveTab() {
+            const tabFile = document.getElementById('tab-file');
+            return (tabFile && !tabFile.classList.contains('hidden')) ? 'file' : 'jawaban';
+        }
+
+        // --- DELETE MODE (jawaban) ---
         window.toggleDeleteMode = () => {
-            deleteMode = !deleteMode;
-            if (deleteMode) {
-                printMode = false;
-                selectedSubmissions.clear();
+            const activeTab = getActiveTab();
+            if (activeTab === 'file') {
+                // Aktifkan file delete mode
+                fileDeleteMode = !fileDeleteMode;
+                if (fileDeleteMode) {
+                    deleteMode = false;
+                    printMode = false;
+                    selectedSubmissions.clear();
+                    selectedFileSubmissions.clear();
+                }
+                updateModeUI();
+                renderFileTable();
+            } else {
+                // Aktifkan jawaban delete mode
+                deleteMode = !deleteMode;
+                if (deleteMode) {
+                    fileDeleteMode = false;
+                    printMode = false;
+                    selectedSubmissions.clear();
+                    selectedFileSubmissions.clear();
+                }
+                updateModeUI();
+                renderSubmissionsTable();
             }
-            updateModeUI();
-            renderSubmissionsTable();
+        };
+
+        window.toggleFileSelection = (id) => {
+            if (selectedFileSubmissions.has(id)) {
+                selectedFileSubmissions.delete(id);
+            } else {
+                selectedFileSubmissions.add(id);
+            }
+            const count = selectedFileSubmissions.size;
+            const btn = document.getElementById('confirm-file-delete-btn');
+            if (btn) btn.innerText = count > 0 ? `🗑️ Hapus ${count} Item` : '🗑️ Hapus Terpilih';
+        };
+
+        window.selectAllFiles = (cb) => {
+            document.querySelectorAll('.file-checkbox').forEach(c => {
+                c.checked = cb.checked;
+                const id = c.dataset.id;
+                if (cb.checked) selectedFileSubmissions.add(id);
+                else selectedFileSubmissions.delete(id);
+            });
+            const count = selectedFileSubmissions.size;
+            const btn = document.getElementById('confirm-file-delete-btn');
+            if (btn) btn.innerText = count > 0 ? `🗑️ Hapus ${count} Item` : '🗑️ Hapus Terpilih';
+        };
+
+        window.confirmFileDelete = async () => {
+            if (selectedFileSubmissions.size === 0) return alert('Pilih setidaknya 1 file untuk dihapus');
+            if (!confirm(`Yakin ingin menghapus ${selectedFileSubmissions.size} file secara permanen?`)) return;
+            const appId = "edu-exam-2026";
+            try {
+                for (const id of selectedFileSubmissions) {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'file_submissions', id));
+                }
+                showNotif(`✅ ${selectedFileSubmissions.size} file berhasil dihapus.`);
+                selectedFileSubmissions.clear();
+                fileDeleteMode = false;
+                updateModeUI();
+                await loadFileSubmissions();
+            } catch (e) {
+                console.error(e);
+                alert("Gagal menghapus: " + e.message);
+            }
         };
 
         window.confirmDelete = async () => {
@@ -646,13 +715,15 @@
         function updateModeUI() {
             const deleteModeBar = document.getElementById('delete-mode-bar');
             const printModeBar = document.getElementById('print-mode-bar');
+            const fileDeleteModeBar = document.getElementById('file-delete-mode-bar');
             const deleteBtnEl = document.getElementById('delete-mode-btn');
             const printBtnEl = document.getElementById('print-mode-btn');
 
             deleteModeBar.classList.toggle('hidden', !deleteMode);
             printModeBar.classList.toggle('hidden', !printMode);
+            if (fileDeleteModeBar) fileDeleteModeBar.classList.toggle('hidden', !fileDeleteMode);
 
-            if (deleteMode) {
+            if (deleteMode || fileDeleteMode) {
                 deleteBtnEl.classList.add('bg-red-600','text-white');
                 deleteBtnEl.classList.remove('bg-red-100','text-red-700');
             } else {
@@ -1052,7 +1123,45 @@
             renderFileCarousel();
         };
         window.konfirmasiFile = () => {};
-        // --- UPLOAD FILE MURID (Multi-file) ---
+        // --- HELPER: Kompres gambar ke base64 agar tidak melebihi batas Firestore ---
+        async function fileToBase64Compressed(file) {
+            return new Promise((resolve, reject) => {
+                // Jika bukan gambar, langsung baca sebagai base64 biasa
+                if (!file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                    return;
+                }
+                // Gambar: kompres dengan canvas agar ukurannya kecil
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        // Maksimal lebar/tinggi 1200px agar file kecil
+                        const MAX = 1200;
+                        let w = img.width, h = img.height;
+                        if (w > MAX || h > MAX) {
+                            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+                            else { w = Math.round(w * MAX / h); h = MAX; }
+                        }
+                        canvas.width = w;
+                        canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        // Kualitas 0.75 cukup bagus dan ukuran jauh lebih kecil
+                        resolve(canvas.toDataURL('image/jpeg', 0.75));
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // --- UPLOAD FILE MURID (Multi-file, tanpa batas ukuran untuk gambar) ---
         window.submitFileUpload = async () => {
             if (selectedFiles.length === 0) return alert('Pilih file terlebih dahulu!');
             const keterangan = document.getElementById('murid-keterangan').value.trim();
@@ -1066,36 +1175,41 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mengupload...';
             btn.disabled = true;
 
+            let berhasil = 0;
+            let gagal = 0;
+
             try {
                 const appId = "edu-exam-2026";
                 for (const file of selectedFiles) {
-                    await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = async (e) => {
-                            try {
-                                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'file_submissions'), {
-                                    teacherId, studentName, studentEmail, studentKelas,
-                                    subject, keterangan,
-                                    fileName: file.name,
-                                    fileType: file.type,
-                                    fileData: e.target.result,
-                                    timestamp: serverTimestamp(),
-                                    dateStr: new Date().toISOString().split('T')[0],
-                                    timeStr: new Date().toLocaleTimeString(),
-                                    nilaiGuru: '', status: 'uploaded'
-                                });
-                                resolve();
-                            } catch(err) { reject(err); }
-                        };
-                        reader.onerror = reject;
-                        reader.readAsDataURL(file);
-                    });
+                    try {
+                        // Kompres gambar, file lain langsung baca
+                        const fileData = await fileToBase64Compressed(file);
+                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'file_submissions'), {
+                            teacherId, studentName, studentEmail, studentKelas,
+                            subject, keterangan,
+                            fileName: file.name,
+                            fileType: file.type,
+                            fileData: fileData,
+                            timestamp: serverTimestamp(),
+                            dateStr: new Date().toISOString().split('T')[0],
+                            timeStr: new Date().toLocaleTimeString(),
+                            nilaiGuru: '', status: 'uploaded'
+                        });
+                        berhasil++;
+                    } catch(err) {
+                        console.error('Gagal upload file:', file.name, err);
+                        gagal++;
+                    }
                 }
-                alert('✅ ' + selectedFiles.length + ' file berhasil diupload!');
-                selectedFiles = [];
-                renderFileCarousel();
-                document.getElementById('upload-file-screen').classList.add('hidden');
-                document.getElementById('login-screen').classList.remove('hidden');
+                if (berhasil > 0) {
+                    alert('✅ ' + berhasil + ' file berhasil diupload!' + (gagal > 0 ? '\n⚠️ ' + gagal + ' file gagal (mungkin terlalu besar, coba kompres dulu).' : ''));
+                    selectedFiles = [];
+                    renderFileCarousel();
+                    document.getElementById('upload-file-screen').classList.add('hidden');
+                    document.getElementById('login-screen').classList.remove('hidden');
+                } else {
+                    alert('❌ Semua file gagal diupload. File mungkin terlalu besar (video/dokumen besar tidak bisa diupload langsung). Coba kirim file yang lebih kecil.');
+                }
             } catch(e) {
                 console.error(e);
                 alert('Gagal upload: ' + e.message);
@@ -1121,13 +1235,38 @@
             const tbody = document.getElementById('file-submissions-tbody');
             if (!tbody) return;
             tbody.innerHTML = '';
+
+            // Update header: tambah/hapus kolom checkbox
+            const thead = document.getElementById('file-submissions-thead');
+            if (thead) {
+                const existingCbTh = thead.querySelector('.file-checkbox-th');
+                if (fileDeleteMode) {
+                    if (!existingCbTh) {
+                        const th = document.createElement('th');
+                        th.className = 'p-3 file-checkbox-th border border-gray-200';
+                        th.innerHTML = '<input type="checkbox" id="select-all-files-cb" onchange="selectAllFiles(this)" class="w-4 h-4">';
+                        thead.insertBefore(th, thead.firstChild);
+                    }
+                } else {
+                    if (existingCbTh) existingCbTh.remove();
+                }
+            }
+
             allFileSubmissionsCache.forEach(sub => {
+                const checkboxCell = fileDeleteMode
+                    ? `<td class="p-3 border border-gray-200">
+                          <input type="checkbox" class="file-checkbox w-4 h-4 accent-blue-600 cursor-pointer"
+                              data-id="${sub.id}" onchange="toggleFileSelection('${sub.id}')">
+                       </td>`
+                    : '';
+
                 // Jika ada multiple files, buat 1 row per file
                 if (sub.files && Array.isArray(sub.files)) {
                     sub.files.forEach((file, idx) => {
                         const tr = document.createElement('tr');
                         tr.className = 'border-b hover:bg-gray-50';
                         tr.innerHTML = `
+                            ${checkboxCell}
                             <td class="p-3 border border-gray-200 font-medium">${sub.studentName || '-'}</td>
                             <td class="p-3 border border-gray-200">${sub.studentKelas || '-'}</td>
                             <td class="p-3 border border-gray-200 text-xs">${sub.studentEmail || '-'}</td>
@@ -1137,11 +1276,8 @@
                                 <a href="${file.url}" class="text-blue-600 hover:underline text-sm font-medium">${file.name}</a>
                             </td>
                             <td class="p-3 border border-gray-200">
-                                <button onclick="previewFileModal('${file.url}', '${file.name}')" class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs mr-1" title="Lihat preview">
+                                <button onclick="previewFileModal('${file.url}', '${file.name}')" class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs" title="Lihat preview">
                                     <i class="fas fa-eye"></i> Periksa
-                                </button>
-                                <button onclick="deleteFileRow('${sub.id}')" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs" title="Hapus file">
-                                    <i class="fas fa-trash"></i> Hapus
                                 </button>
                             </td>
                             <td class="p-3 border border-gray-200">0-100</td>
@@ -1153,6 +1289,7 @@
                     const tr = document.createElement('tr');
                     tr.className = 'border-b hover:bg-gray-50';
                     tr.innerHTML = `
+                        ${checkboxCell}
                         <td class="p-3 border border-gray-200 font-medium">${sub.studentName || '-'}</td>
                         <td class="p-3 border border-gray-200">${sub.studentKelas || '-'}</td>
                         <td class="p-3 border border-gray-200 text-xs">${sub.studentEmail || '-'}</td>
@@ -1165,9 +1302,6 @@
                         <td class="p-3 border border-gray-200">
                             <input type="number" value="${sub.nilaiGuru || ''}" min="0" max="100" placeholder="0-100"
                                 class="w-16 p-1 border rounded text-sm" onchange="saveNilaiFile('${sub.id}', this.value)">
-                        </td>
-                        <td class="p-3 border border-gray-200">
-                            <button onclick="deleteFileSubmission('${sub.id}')" class="text-red-500 hover:text-red-700 text-xs"><i class="fas fa-trash"></i></button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -1281,6 +1415,15 @@
             const file = document.getElementById('tab-file');
             const btnJ = document.getElementById('btn-tab-jawaban');
             const btnF = document.getElementById('btn-tab-file');
+
+            // Reset semua mode saat pindah tab
+            deleteMode = false;
+            fileDeleteMode = false;
+            printMode = false;
+            selectedSubmissions.clear();
+            selectedFileSubmissions.clear();
+            updateModeUI();
+
             if (tab === 'jawaban') {
                 jawaban.classList.remove('hidden');
                 file.classList.add('hidden');
@@ -1288,6 +1431,7 @@
                 btnJ.classList.remove('bg-gray-100','text-gray-700');
                 btnF.classList.add('bg-gray-100','text-gray-700');
                 btnF.classList.remove('bg-blue-600','text-white');
+                renderSubmissionsTable();
             } else {
                 file.classList.remove('hidden');
                 jawaban.classList.add('hidden');
@@ -1616,9 +1760,17 @@
 
                         <!-- TAB FILE -->
                         <div id="tab-file" class="hidden">
+                            <!-- File Delete Mode Bar -->
+                            <div id="file-delete-mode-bar" class="hidden mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between">
+                                <span class="text-sm text-red-700 font-medium"><i class="fas fa-info-circle mr-1"></i>Mode Hapus aktif. Centang baris file yang ingin dihapus.</span>
+                                <div class="flex gap-2">
+                                    <button id="confirm-file-delete-btn" onclick="confirmFileDelete()" class="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">&#128465;&#65039; Hapus Terpilih</button>
+                                    <button onclick="toggleDeleteMode()" class="bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm">Batal</button>
+                                </div>
+                            </div>
                             <div class="overflow-x-auto">
                                 <table class="w-full text-left text-sm border border-gray-200">
-                                    <thead class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200">
+                                    <thead id="file-submissions-thead" class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200">
                                         <tr>
                                             <th class="p-3 border border-gray-200">Nama Murid</th>
                                             <th class="p-3 border border-gray-200">Kelas/Semester</th>
@@ -1628,7 +1780,6 @@
                                             <th class="p-3 border border-gray-200">File</th>
                                             <th class="p-3 border border-gray-200">Keterangan</th>
                                             <th class="p-3 border border-gray-200">Nilai (Guru)</th>
-                                            <th class="p-3 border border-gray-200">Aksi</th>
                                         </tr>
                                     </thead>
                                     <tbody id="file-submissions-tbody"></tbody>
