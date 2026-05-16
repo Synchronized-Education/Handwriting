@@ -32,7 +32,7 @@
         const db = getFirestore(app);
         const provider = new GoogleAuthProvider();
 
-        const geminiApiKey = "";
+        const geminiApiKey = "AIzaSyBUHMiNHmZ6LBlSxL3k08pMq3AiMiNhY6M";
         window.__geminiKey = geminiApiKey;
         window.__geminiKeyUM = geminiApiKey; 
 
@@ -91,40 +91,44 @@
         };
 
         window.loginMurid = async () => {
-            const idSoal = document.getElementById('student-teacher-id').value.trim();
+            const idInput = document.getElementById('student-teacher-id').value.trim();
             const namaMurid = document.getElementById('student-name').value.trim();
-            const kelasSemester = document.getElementById('student-kelas-semester').value.trim();
-            if (!idSoal || !namaMurid) return alert("Isi Nama Lengkap dan ID Soal!");
-            if (!kelasSemester) return alert("Isi Kelas/Semester!");
-            localStorage.setItem('studentKelasSmtr', kelasSemester);
+            const kelasMurid = document.getElementById('student-kelas').value.trim();
+            if (!idInput || !namaMurid) return alert("Isi Nama Lengkap dan ID Soal/Guru!");
 
             const btn = document.getElementById('btn-masuk-ujian');
-            btn.innerText = 'Mencari soal...';
+            btn.innerText = 'Mencari...';
             btn.disabled = true;
 
             try {
                 const appId = "edu-exam-2026";
-                // Cari soal berdasarkan publishId
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'exams'), where("publishId", "==", idSoal));
-                const snap = await getDocs(q);
-
-                if (snap.empty) {
-                    alert("ID Soal tidak ditemukan! Pastikan ID soal yang dimasukkan sudah benar.");
-                    btn.innerText = 'Masuk Ujian';
-                    btn.disabled = false;
-                    return;
-                }
-
-                // Ambil soal pertama yang cocok
-                const examDoc = snap.docs[0];
-                userRole = 'student';
                 localStorage.setItem('studentName', namaMurid);
+                localStorage.setItem('studentKelas', kelasMurid);
 
-                // Langsung masuk ke soal
-                studentDashboard.classList.remove('hidden');
-                loginScreen.classList.add('hidden');
-                document.getElementById('student-display-name').innerText = namaMurid;
-                await startExam(examDoc.id);
+                // Cek apakah input adalah ID soal (format EDU-...)
+                if (idInput.startsWith('EDU-')) {
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'exams'), where("publishId", "==", idInput));
+                    const snap = await getDocs(q);
+                    if (snap.empty) {
+                        alert("ID Soal tidak ditemukan!");
+                        btn.innerText = 'Masuk Ujian';
+                        btn.disabled = false;
+                        return;
+                    }
+                    const examDoc = snap.docs[0];
+                    userRole = 'student';
+                    studentDashboard.classList.remove('hidden');
+                    loginScreen.classList.add('hidden');
+                    document.getElementById('student-display-name').innerText = namaMurid;
+                    await startExam(examDoc.id);
+                } else {
+                    // Dianggap sebagai ID Guru → tampilkan form upload file
+                    localStorage.setItem('targetTeacherId', idInput);
+                    userRole = 'student';
+                    loginScreen.classList.add('hidden');
+                    document.getElementById('upload-file-screen').classList.remove('hidden');
+                    document.getElementById('upload-student-name-display').innerText = namaMurid;
+                }
             } catch (e) {
                 console.error(e);
                 alert("Gagal: " + e.message);
@@ -145,14 +149,14 @@
                 loginScreen.classList.add('hidden');
                 teacherDashboard.classList.remove('hidden');
                 document.getElementById('teacher-name-display').innerText = user.displayName;
-                // Tampilkan ID Guru di navbar
-                const teacherIdDisplay = document.getElementById('teacher-id-display');
-                if (teacherIdDisplay) {
-                    teacherIdDisplay.innerText = `Guru EduSmart: ID: ${user.uid}`;
-                }
-                // ID tidak ditampilkan di navbar lagi
+                document.getElementById('teacher-id-display').innerText = user.uid;
+                document.getElementById('teacher-id-display').onclick = () => {
+                    navigator.clipboard.writeText(user.uid);
+                    showNotif('✅ ID Guru disalin!');
+                };
                 loadTeacherSubmissions();
                 loadMyCreatedExams();
+                loadFileSubmissions();
             } else {
                 loginScreen.classList.remove('hidden');
                 teacherDashboard.classList.add('hidden');
@@ -388,6 +392,7 @@
                 examTitle: currentActiveExam.title,
                 subject: currentActiveExam.subject || '',
                 grade: currentActiveExam.grade || '',
+                studentKelas: localStorage.getItem('studentKelas') || '',
                 publishId: currentActiveExam.publishId || '',
                 teacherId: currentActiveExam.teacherId,
                 studentName: studentName,
@@ -451,6 +456,7 @@
                 tr.innerHTML = `
                     ${checkboxCell}
                     <td class="p-3 border border-gray-200 font-medium text-gray-900">${sub.studentName || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-gray-900">${sub.studentKelas || '-'}</td>
                     <td class="p-3 border border-gray-200 text-xs text-gray-700">${sub.studentEmail || '-'}</td>
                     <td class="p-3 border border-gray-200 text-gray-900">${sub.subject || '-'}</td>
                     <td class="p-3 border border-gray-200 text-gray-900">${sub.examTitle || '-'}</td>
@@ -806,14 +812,20 @@
                     }
                 });
                 let finalScore = 0;
-                if (totalMax > 0) {
-                    const pgPart = (autoScore / totalMax) * 100;
-                    if (manualCount > 0) {
-                        const essayPart = manualTotal / manualCount;
-                        finalScore = Math.round((pgPart * 0.4) + (essayPart * 0.6));
-                    } else {
-                        finalScore = Math.round(pgPart);
-                    }
+                // Hitung hanya soal PG: benar / total_pg * 100
+                const pgQuestions = examData.questions.filter(q => q.type === 'pg');
+                const pgTotal = pgQuestions.length;
+                if (pgTotal > 0 && manualCount === 0) {
+                    // Semua soal PG
+                    finalScore = Math.round((autoScore / pgTotal) * 100);
+                } else if (pgTotal > 0 && manualCount > 0) {
+                    // Campuran PG + Esai
+                    const pgScore = (autoScore / pgTotal) * 100;
+                    const essayScore = manualTotal / manualCount;
+                    finalScore = Math.round((pgScore + essayScore) / 2);
+                } else if (manualCount > 0) {
+                    // Semua esai
+                    finalScore = Math.round(manualTotal / manualCount);
                 }
                 await updateDoc(subRef, { score: finalScore, status: 'graded' });
                 // Update cache lokal
@@ -961,8 +973,214 @@
             }
         };
 
-        // --- NOTIFIKASI ---
-        function showNotif(msg) {
+        // --- HANDLE FILE CAPTURE ---
+        let selectedFileObj = null;
+
+        window.handleFileCapture = (input, type) => {
+            if (!input.files.length) return;
+            const file = input.files[0];
+            selectedFileObj = file;
+            // Set ke murid-file-input supaya submitFileUpload bisa baca
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('murid-file-input').files = dt.files;
+
+            const preview = document.getElementById('file-preview-area');
+            const url = URL.createObjectURL(file);
+            let html = '';
+            if (file.type.startsWith('image/')) {
+                html = `<img src="${url}" class="max-h-52 rounded-xl mx-auto object-contain">`;
+            } else if (file.type.startsWith('video/')) {
+                html = `<video src="${url}" controls class="max-h-52 w-full rounded-xl"></video>`;
+            } else {
+                html = `<div class="p-4 bg-gray-600 rounded-xl text-center">
+                    <i class="fas fa-file text-4xl text-yellow-400 mb-2 block"></i>
+                    <p class="text-white text-sm font-medium">${file.name}</p>
+                    <p class="text-gray-400 text-xs">${(file.size/1024).toFixed(1)} KB</p>
+                </div>`;
+            }
+            preview.innerHTML = html;
+            preview.classList.remove('hidden');
+            document.getElementById('upload-placeholder').classList.add('hidden');
+            document.getElementById('file-confirm-area').classList.remove('hidden');
+            document.getElementById('btn-submit-file').classList.add('hidden');
+        };
+
+        window.batalFile = () => {
+            selectedFileObj = null;
+            document.getElementById('file-preview-area').innerHTML = '';
+            document.getElementById('file-preview-area').classList.add('hidden');
+            document.getElementById('upload-placeholder').classList.remove('hidden');
+            document.getElementById('file-confirm-area').classList.add('hidden');
+            document.getElementById('btn-submit-file').classList.add('hidden');
+        };
+
+        window.konfirmasiFile = () => {
+            document.getElementById('file-confirm-area').classList.add('hidden');
+            document.getElementById('btn-submit-file').classList.remove('hidden');
+        };
+        window.submitFileUpload = async () => {
+            const fileInput = document.getElementById('murid-file-input');
+            const keterangan = document.getElementById('murid-keterangan').value.trim();
+            const subject = document.getElementById('murid-subject').value.trim();
+            const teacherId = localStorage.getItem('targetTeacherId');
+            const studentName = localStorage.getItem('studentName');
+            const studentEmail = localStorage.getItem('studentEmail') || '';
+            const studentKelas = localStorage.getItem('studentKelas') || '';
+
+            if (!fileInput.files.length) return alert('Pilih file terlebih dahulu!');
+            const file = fileInput.files[0];
+
+            const btn = document.getElementById('btn-submit-file');
+            btn.innerText = 'Mengupload...';
+            btn.disabled = true;
+
+            try {
+                // Konversi file ke base64 untuk disimpan (max 1MB)
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const base64 = e.target.result;
+                    const appId = "edu-exam-2026";
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'file_submissions'), {
+                        teacherId: teacherId,
+                        studentName: studentName,
+                        studentEmail: studentEmail,
+                        studentKelas: studentKelas,
+                        subject: subject,
+                        keterangan: keterangan,
+                        fileName: file.name,
+                        fileType: file.type,
+                        fileData: base64,
+                        timestamp: serverTimestamp(),
+                        dateStr: new Date().toISOString().split('T')[0],
+                        timeStr: new Date().toLocaleTimeString(),
+                        nilaiGuru: '',
+                        status: 'uploaded'
+                    });
+                    alert('File berhasil diupload! Guru akan memeriksa file Anda.');
+                    document.getElementById('upload-file-screen').classList.add('hidden');
+                };
+                reader.readAsDataURL(file);
+            } catch(e) {
+                console.error(e);
+                alert('Gagal upload: ' + e.message);
+            } finally {
+                btn.innerText = 'Kirim File';
+                btn.disabled = false;
+            }
+        };
+
+        window.previewFile = () => {
+            const fileInput = document.getElementById('murid-file-input');
+            const preview = document.getElementById('file-preview-area');
+            if (!fileInput.files.length) return;
+            const file = fileInput.files[0];
+            const url = URL.createObjectURL(file);
+            let html = '';
+            if (file.type.startsWith('image/')) {
+                html = `<img src="${url}" class="max-h-48 rounded-xl mx-auto">`;
+            } else if (file.type.startsWith('video/')) {
+                html = `<video src="${url}" controls class="max-h-48 w-full rounded-xl"></video>`;
+            } else {
+                html = `<div class="p-4 bg-gray-100 rounded-xl text-center"><i class="fas fa-file text-4xl text-gray-400 mb-2"></i><p class="text-sm font-medium">${file.name}</p></div>`;
+            }
+            preview.innerHTML = html;
+            preview.classList.remove('hidden');
+        };
+
+        // --- LOAD FILE SUBMISSIONS (untuk tabel file murid) ---
+        let allFileSubmissionsCache = [];
+        async function loadFileSubmissions() {
+            if (!currentUser) return;
+            const appId = "edu-exam-2026";
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'file_submissions'), where("teacherId", "==", currentUser.uid));
+            const snap = await getDocs(q);
+            allFileSubmissionsCache = [];
+            snap.forEach(d => allFileSubmissionsCache.push({ id: d.id, ...d.data() }));
+            renderFileTable();
+        }
+
+        function renderFileTable() {
+            const tbody = document.getElementById('file-submissions-tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            allFileSubmissionsCache.forEach(sub => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="p-3 border border-gray-200 font-medium">${sub.studentName || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-xs">${sub.studentEmail || '-'}</td>
+                    <td class="p-3 border border-gray-200">${sub.subject || '-'}</td>
+                    <td class="p-3 border border-gray-200">${sub.studentKelas || '-'}</td>
+                    <td class="p-3 border border-gray-200 text-sm">${sub.dateStr || ''}<br><span class="text-xs text-gray-400">${sub.timeStr || ''}</span></td>
+                    <td class="p-3 border border-gray-200">
+                        ${sub.fileData ? `<button onclick="viewFile('${sub.id}')" class="text-blue-600 underline text-xs">${sub.fileName || 'Lihat File'}</button>` : '-'}
+                    </td>
+                    <td class="p-3 border border-gray-200 text-xs">${sub.keterangan || '-'}</td>
+                    <td class="p-3 border border-gray-200">
+                        <input type="number" value="${sub.nilaiGuru || ''}" min="0" max="100" placeholder="0-100"
+                            class="w-16 p-1 border rounded text-sm" onchange="saveNilaiFile('${sub.id}', this.value)">
+                    </td>
+                    <td class="p-3 border border-gray-200">
+                        <button onclick="deleteFileSubmission('${sub.id}')" class="text-red-500 hover:text-red-700 text-xs"><i class="fas fa-trash"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        window.saveNilaiFile = async (id, nilai) => {
+            const appId = "edu-exam-2026";
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'file_submissions', id), { nilaiGuru: nilai });
+            showNotif('✅ Nilai file disimpan: ' + nilai);
+        };
+
+        window.deleteFileSubmission = async (id) => {
+            if (!confirm('Hapus file ini permanen?')) return;
+            const appId = "edu-exam-2026";
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'file_submissions', id));
+            await loadFileSubmissions();
+            showNotif('✅ File berhasil dihapus.');
+        };
+
+        window.viewFile = (id) => {
+            const sub = allFileSubmissionsCache.find(s => s.id === id);
+            if (!sub || !sub.fileData) return;
+            const win = window.open('', '_blank');
+            if (sub.fileType.startsWith('image/')) {
+                win.document.write(`<img src="${sub.fileData}" style="max-width:100%">`);
+            } else if (sub.fileType.startsWith('video/')) {
+                win.document.write(`<video src="${sub.fileData}" controls style="max-width:100%"></video>`);
+            } else {
+                const link = win.document.createElement('a');
+                link.href = sub.fileData;
+                link.download = sub.fileName;
+                link.click();
+            }
+        };
+
+        window.switchTab = (tab) => {
+            const jawaban = document.getElementById('tab-jawaban');
+            const file = document.getElementById('tab-file');
+            const btnJ = document.getElementById('btn-tab-jawaban');
+            const btnF = document.getElementById('btn-tab-file');
+            if (tab === 'jawaban') {
+                jawaban.classList.remove('hidden');
+                file.classList.add('hidden');
+                btnJ.classList.add('bg-blue-600','text-white');
+                btnJ.classList.remove('bg-gray-100','text-gray-700');
+                btnF.classList.add('bg-gray-100','text-gray-700');
+                btnF.classList.remove('bg-blue-600','text-white');
+            } else {
+                file.classList.remove('hidden');
+                jawaban.classList.add('hidden');
+                btnF.classList.add('bg-blue-600','text-white');
+                btnF.classList.remove('bg-gray-100','text-gray-700');
+                btnJ.classList.add('bg-gray-100','text-gray-700');
+                btnJ.classList.remove('bg-blue-600','text-white');
+                loadFileSubmissions();
+            }
+        };
             const el = document.getElementById('notif-bar');
             el.innerText = msg;
             el.classList.remove('hidden');
@@ -1041,8 +1259,8 @@
                     </button>
                     <div id="murid-form" class="hidden space-y-2">
                         <input id="student-name" type="text" placeholder="Nama Lengkap Murid" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
-                        <input id="student-teacher-id" type="text" placeholder="ID Soal (Dari Guru Anda, contoh: EDU-XXXXXXXX)" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
-                        <input id="student-kelas-semester" type="text" placeholder="Kelas/Semester (contoh: 10-A / Semester 1)" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
+                        <input id="student-teacher-id" type="text" placeholder="ID Soal atau ID Guru (contoh: EDU-XXXXXXXX)" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
+                        <input id="student-kelas" type="text" placeholder="Kelas / Semester (contoh: 6C / Semester 1)" class="w-full px-4 py-2.5 rounded-xl border border-blue-300 focus:ring-2 focus:ring-white outline-none text-sm">
                         <button id="btn-masuk-ujian" onclick="loginMurid()" class="w-full bg-gray-800 text-white py-2.5 rounded-xl font-bold hover:bg-gray-900 transition-all text-sm">
                             Masuk Ujian
                         </button>
@@ -1074,9 +1292,8 @@
             </div>
             <div class="flex items-center gap-4">
                 <div class="text-right hidden md:block">
-                    <!-- ID guru tidak ditampilkan di navbar -->
                     <p class="text-sm font-bold" id="teacher-name-display">-</p>
-                    <p class="text-xs text-gray-400" id="teacher-id-display">Guru EduSmart</p>
+                    <p class="text-xs text-gray-400">Guru EduSmart | ID: <span id="teacher-id-display" class="font-mono select-all cursor-pointer" title="Klik untuk salin"></span></p>
                 </div>
                 <button onclick="logout()" class="text-red-500 hover:bg-red-50 p-2 rounded-full" title="Logout">
                     <i class="fas fa-power-off"></i>
@@ -1214,61 +1431,90 @@
                 <!-- View: Submissions/Evaluasi -->
                 <div id="submissions-view" class="view-section hidden space-y-4">
                     <div class="bg-white p-6 rounded-2xl shadow-sm border overflow-hidden">
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
                             <h2 class="text-xl font-bold">Monitor & Evaluasi Murid</h2>
                             <div class="flex flex-wrap gap-2">
-                                <!-- Filter Tanggal -->
                                 <input type="date" id="filter-date" onchange="applyDateFilter()" class="p-2 border rounded-lg text-sm">
-                                <!-- Tombol Cari -->
                                 <button onclick="openSearchModal()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-1 hover:bg-gray-200">
                                     <i class="fas fa-search"></i> Cari
                                 </button>
-                                <!-- Tombol Print -->
                                 <button id="print-mode-btn" onclick="togglePrintMode()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm flex items-center gap-1 hover:bg-gray-200">
                                     <i class="fas fa-print"></i> Print
                                 </button>
-                                <!-- Tombol Hapus -->
                                 <button id="delete-mode-btn" onclick="toggleDeleteMode()" class="bg-red-100 text-red-700 px-4 py-2 rounded-lg text-sm flex items-center gap-1 hover:bg-red-200">
                                     <i class="fas fa-trash"></i> Hapus
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Delete Mode Bar -->
-                        <div id="delete-mode-bar" class="hidden mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between">
-                            <span class="text-sm text-red-700 font-medium"><i class="fas fa-info-circle mr-1"></i>Mode Hapus aktif. Centang baris yang ingin dihapus.</span>
-                            <div class="flex gap-2">
-                                <button id="confirm-delete-btn" onclick="confirmDelete()" class="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">🗑️ Hapus Terpilih</button>
-                                <button onclick="toggleDeleteMode()" class="bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm">Batal</button>
+                        <!-- TAB SWITCHER -->
+                        <div class="flex gap-2 mb-4">
+                            <button id="btn-tab-jawaban" onclick="switchTab('jawaban')" class="bg-blue-600 text-white px-5 py-2 rounded-xl font-semibold text-sm">
+                                📝 Jawaban Murid
+                            </button>
+                            <button id="btn-tab-file" onclick="switchTab('file')" class="bg-gray-100 text-gray-700 px-5 py-2 rounded-xl font-semibold text-sm hover:bg-gray-200">
+                                📁 File Murid
+                            </button>
+                        </div>
+
+                        <!-- TAB JAWABAN -->
+                        <div id="tab-jawaban">
+                            <!-- Delete Mode Bar -->
+                            <div id="delete-mode-bar" class="hidden mb-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between">
+                                <span class="text-sm text-red-700 font-medium"><i class="fas fa-info-circle mr-1"></i>Mode Hapus aktif. Centang baris yang ingin dihapus.</span>
+                                <div class="flex gap-2">
+                                    <button id="confirm-delete-btn" onclick="confirmDelete()" class="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700">🗑️ Hapus Terpilih</button>
+                                    <button onclick="toggleDeleteMode()" class="bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm">Batal</button>
+                                </div>
+                            </div>
+                            <!-- Print Mode Bar -->
+                            <div id="print-mode-bar" class="hidden mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+                                <span class="text-sm text-blue-700 font-medium"><i class="fas fa-info-circle mr-1"></i>Mode Print aktif. Centang baris yang ingin diprint.</span>
+                                <div class="flex gap-2">
+                                    <button id="confirm-print-btn" onclick="confirmPrintSelected()" class="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-blue-700">🖨️ Print Terpilih</button>
+                                    <button onclick="togglePrintMode()" class="bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm">Batal</button>
+                                </div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm border border-gray-200">
+                                    <thead class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200" id="submissions-thead">
+                                        <tr>
+                                            <th class="p-3 border border-gray-200">Nama Murid</th>
+                                            <th class="p-3 border border-gray-200">Kelas/Semester</th>
+                                            <th class="p-3 border border-gray-200">Email</th>
+                                            <th class="p-3 border border-gray-200">Mata Pelajaran</th>
+                                            <th class="p-3 border border-gray-200">Judul Soal</th>
+                                            <th class="p-3 border border-gray-200 text-center">Jml Soal</th>
+                                            <th class="p-3 border border-gray-200">Waktu Pengerjaan</th>
+                                            <th class="p-3 border border-gray-200 text-center">Nilai</th>
+                                            <th class="p-3 border border-gray-200">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="submissions-table-body"></tbody>
+                                </table>
                             </div>
                         </div>
 
-                        <!-- Print Mode Bar -->
-                        <div id="print-mode-bar" class="hidden mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-                            <span class="text-sm text-blue-700 font-medium"><i class="fas fa-info-circle mr-1"></i>Mode Print aktif. Centang baris yang ingin diprint.</span>
-                            <div class="flex gap-2">
-                                <button id="confirm-print-btn" onclick="confirmPrintSelected()" class="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-blue-700">🖨️ Print Terpilih</button>
-                                <button onclick="togglePrintMode()" class="bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm">Batal</button>
+                        <!-- TAB FILE -->
+                        <div id="tab-file" class="hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm border border-gray-200">
+                                    <thead class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200">
+                                        <tr>
+                                            <th class="p-3 border border-gray-200">Nama Murid</th>
+                                            <th class="p-3 border border-gray-200">Email</th>
+                                            <th class="p-3 border border-gray-200">Mata Pelajaran</th>
+                                            <th class="p-3 border border-gray-200">Kelas/Semester</th>
+                                            <th class="p-3 border border-gray-200">Waktu Pengerjaan</th>
+                                            <th class="p-3 border border-gray-200">File</th>
+                                            <th class="p-3 border border-gray-200">Keterangan</th>
+                                            <th class="p-3 border border-gray-200">Nilai (Guru)</th>
+                                            <th class="p-3 border border-gray-200">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="file-submissions-tbody"></tbody>
+                                </table>
                             </div>
-                        </div>
-
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm border border-gray-200">
-                                <thead class="bg-gray-100 text-gray-800 text-xs uppercase font-bold border border-gray-200" id="submissions-thead">
-                                    <tr>
-                                        <th class="p-3 border border-gray-200">Nama Murid</th>
-                                        <th class="p-3 border border-gray-200">Email</th>
-                                        <th class="p-3 border border-gray-200">Mata Pelajaran</th>
-                                        <th class="p-3 border border-gray-200">Judul Soal</th>
-                                        <th class="p-3 border border-gray-200 text-center">Jml Soal</th>
-                                        <th class="p-3 border border-gray-200">Waktu Pengerjaan</th>
-                                        <th class="p-3 border border-gray-200 text-center">Nilai</th>
-                                        <th class="p-3 border border-gray-200">Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="submissions-table-body">
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>
@@ -1303,7 +1549,80 @@
         </div>
     </div>
 
-    <!-- GRADING MODAL -->
+    <!-- UPLOAD FILE SCREEN -->
+    <div id="upload-file-screen" class="hidden min-h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div class="bg-gray-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl">
+            <div class="bg-gray-700 p-5 flex justify-between items-center">
+                <div>
+                    <h2 class="text-white font-bold text-lg flex items-center gap-2"><i class="fas fa-upload"></i> Upload Hasil Kerja</h2>
+                    <p class="text-gray-300 text-xs mt-1">Halo, <span id="upload-student-name-display" class="font-semibold"></span></p>
+                </div>
+                <button onclick="document.getElementById('upload-file-screen').classList.add('hidden');document.getElementById('login-screen').classList.remove('hidden')" class="text-gray-400 hover:text-white"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <div class="p-5 space-y-4">
+                <!-- Input Mata Pelajaran -->
+                <div>
+                    <label class="text-gray-300 text-xs font-semibold uppercase mb-1 block">Mata Pelajaran</label>
+                    <input id="murid-subject" type="text" placeholder="Contoh: PAI, Matematika..." class="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-xl outline-none focus:border-blue-400 text-sm">
+                </div>
+
+                <!-- Keterangan -->
+                <div>
+                    <label class="text-gray-300 text-xs font-semibold uppercase mb-1 block">Keterangan</label>
+                    <textarea id="murid-keterangan" rows="2" placeholder="Tulis keterangan tugas..." class="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-xl outline-none focus:border-blue-400 text-sm resize-none"></textarea>
+                </div>
+
+                <!-- Area Upload File -->
+                <div>
+                    <label class="text-gray-300 text-xs font-semibold uppercase mb-1 block">File / Foto / Video</label>
+                    <div class="border-2 border-dashed border-gray-500 rounded-2xl p-6 text-center bg-gray-700 relative">
+                        <div id="file-preview-area" class="hidden mb-3"></div>
+                        <div id="upload-placeholder">
+                            <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-3 block"></i>
+                            <p class="text-gray-400 text-sm mb-4">Pilih cara upload file</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <!-- Kamera -->
+                                <label class="flex flex-col items-center gap-1 bg-gray-600 hover:bg-gray-500 rounded-xl p-3 cursor-pointer transition-all">
+                                    <i class="fas fa-video text-blue-400 text-xl"></i>
+                                    <span class="text-xs text-gray-300">Kamera</span>
+                                    <input type="file" accept="video/*" capture="environment" class="hidden" onchange="handleFileCapture(this, 'video')">
+                                </label>
+                                <!-- Foto -->
+                                <label class="flex flex-col items-center gap-1 bg-gray-600 hover:bg-gray-500 rounded-xl p-3 cursor-pointer transition-all">
+                                    <i class="fas fa-camera text-green-400 text-xl"></i>
+                                    <span class="text-xs text-gray-300">Foto</span>
+                                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleFileCapture(this, 'image')">
+                                </label>
+                                <!-- File -->
+                                <label class="flex flex-col items-center gap-1 bg-gray-600 hover:bg-gray-500 rounded-xl p-3 cursor-pointer transition-all">
+                                    <i class="fas fa-folder-open text-yellow-400 text-xl"></i>
+                                    <span class="text-xs text-gray-300">File</span>
+                                    <input type="file" accept="*/*" class="hidden" id="murid-file-input" onchange="handleFileCapture(this, 'file')">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tombol konfirmasi setelah file dipilih (tersembunyi awalnya) -->
+                <div id="file-confirm-area" class="hidden space-y-3">
+                    <div class="flex gap-3">
+                        <button onclick="batalFile()" class="flex-1 flex items-center justify-center gap-2 bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700">
+                            <i class="fas fa-times"></i> Ulangi
+                        </button>
+                        <button onclick="konfirmasiFile()" class="flex-1 flex items-center justify-center gap-2 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700">
+                            <i class="fas fa-check"></i> Gunakan
+                        </button>
+                    </div>
+                </div>
+
+                <button id="btn-submit-file" onclick="submitFileUpload()" class="hidden w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
+                    <i class="fas fa-paper-plane"></i> Kirim File
+                </button>
+            </div>
+        </div>
+    </div>
     <div id="grading-modal" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-6 hidden">
         <div class="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div class="p-6 border-b flex justify-between items-center">
