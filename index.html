@@ -620,6 +620,12 @@
 
         // --- PRINT MODE ---
         window.togglePrintMode = () => {
+            const activeTab = getActiveTab();
+            if (activeTab === 'file') {
+                // Print tab file: langsung print semua baris yang terlihat
+                printFileTable();
+                return;
+            }
             printMode = !printMode;
             if (printMode) {
                 deleteMode = false;
@@ -628,6 +634,49 @@
             updateModeUI();
             renderSubmissionsTable();
         };
+
+        function printFileTable() {
+            const rows = document.querySelectorAll('#file-submissions-tbody tr');
+            if (rows.length === 0) return alert('Tidak ada data untuk diprint.');
+            let printContent = '<html><head><title>File Murid</title><style>';
+            printContent += '@media print { @page { margin: 1.5cm; } }';
+            printContent += 'body{font-family:Arial,sans-serif;font-size:12px;color:#000;}';
+            printContent += 'table{width:100%;border-collapse:collapse;}';
+            printContent += 'th,td{border:1px solid #999;padding:6px 8px;text-align:left;vertical-align:middle;}';
+            printContent += 'th{background:#f3f4f6;font-weight:bold;font-size:11px;text-transform:uppercase;}';
+            printContent += 'h2{text-align:center;margin-bottom:12px;}';
+            printContent += '</style></head><body>';
+            printContent += '<h2>Daftar File Murid</h2>';
+            printContent += '<table><thead><tr>';
+            printContent += '<th>No</th><th>Nama Murid</th><th>Kelas/Semester</th><th>Email</th><th>Mata Pelajaran</th><th>Waktu</th><th>Jumlah File</th><th>Keterangan</th><th>Nilai (Guru)</th>';
+            printContent += '</tr></thead><tbody>';
+            rows.forEach((tr, i) => {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length < 7) return;
+                // Ambil kolom: nama, kelas, email, mapel, waktu, file(badge), keterangan, nilai
+                const offset = fileDeleteMode ? 1 : 0;
+                const nama = tds[offset].innerText.trim();
+                const kelas = tds[offset+1].innerText.trim();
+                const email = tds[offset+2].innerText.trim();
+                const mapel = tds[offset+3].innerText.trim();
+                const waktu = tds[offset+4].innerText.trim();
+                const fileBadge = tds[offset+5].innerText.trim();
+                const ket = tds[offset+6] ? tds[offset+6].innerText.trim() : '-';
+                const nilai = tds[offset+7] ? tds[offset+7].querySelector('input')?.value || '-' : '-';
+                printContent += '<tr>';
+                printContent += '<td>' + (i+1) + '</td>';
+                printContent += '<td>' + nama + '</td><td>' + kelas + '</td><td>' + email + '</td>';
+                printContent += '<td>' + mapel + '</td><td>' + waktu + '</td>';
+                printContent += '<td style="text-align:center;">' + fileBadge + '</td>';
+                printContent += '<td>' + ket + '</td><td>' + nilai + '</td>';
+                printContent += '</tr>';
+            });
+            printContent += '</tbody></table></body></html>';
+            const win = window.open('', '_blank');
+            win.document.write(printContent);
+            win.document.close();
+            win.print();
+        }
 
         window.confirmPrintSelected = async () => {
             if (selectedSubmissions.size === 0) return alert('Pilih setidaknya 1 data untuk diprint');
@@ -758,10 +807,25 @@
             };
             const hasAny = Object.values(searchParams).some(v => v !== '');
             closeSearchModal();
-            if (!hasAny) {
-                renderSubmissionsTable();
+            const activeTab = getActiveTab();
+            if (activeTab === 'file') {
+                if (!hasAny) {
+                    renderFileTable();
+                } else {
+                    // Untuk file: gunakan studentName, subject, grade (kelas), examTitle sebagai keterangan
+                    renderFileTable('all', {
+                        studentName: searchParams.studentName,
+                        subject: searchParams.subject,
+                        grade: searchParams.grade,
+                        keterangan: searchParams.examTitle,
+                    });
+                }
             } else {
-                renderSubmissionsTable('all', searchParams);
+                if (!hasAny) {
+                    renderSubmissionsTable();
+                } else {
+                    renderSubmissionsTable('all', searchParams);
+                }
             }
         };
 
@@ -769,13 +833,23 @@
             ['search-student','search-subject','search-grade','search-title','search-id'].forEach(id => {
                 document.getElementById(id).value = '';
             });
-            renderSubmissionsTable();
+            const activeTab = getActiveTab();
+            if (activeTab === 'file') {
+                renderFileTable();
+            } else {
+                renderSubmissionsTable();
+            }
         };
 
         // --- DATE FILTER ---
         window.applyDateFilter = () => {
             const date = document.getElementById('filter-date').value;
-            renderSubmissionsTable(date || 'all');
+            const activeTab = getActiveTab();
+            if (activeTab === 'file') {
+                renderFileTable(date || 'all');
+            } else {
+                renderSubmissionsTable(date || 'all');
+            }
         };
 
         // --- UPDATE STATS ---
@@ -1325,7 +1399,7 @@
             renderFileTable();
         }
 
-        function renderFileTable() {
+        function renderFileTable(filterDate = 'all', searchParams = null) {
             const tbody = document.getElementById('file-submissions-tbody');
             if (!tbody) return;
             tbody.innerHTML = '';
@@ -1346,9 +1420,22 @@
                 }
             }
 
+            // Filter berdasarkan tanggal dan search
+            let filteredFile = allFileSubmissionsCache.filter(sub => {
+                if (filterDate !== 'all' && sub.dateStr !== filterDate) return false;
+                if (searchParams) {
+                    const sp = searchParams;
+                    if (sp.studentName && !sub.studentName?.toLowerCase().includes(sp.studentName.toLowerCase())) return false;
+                    if (sp.subject && !sub.subject?.toLowerCase().includes(sp.subject.toLowerCase())) return false;
+                    if (sp.grade && !sub.studentKelas?.toLowerCase().includes(sp.grade.toLowerCase())) return false;
+                    if (sp.keterangan && !sub.keterangan?.toLowerCase().includes(sp.keterangan.toLowerCase())) return false;
+                }
+                return true;
+            });
+
             // Setiap dokumen Firestore = 1 baris (1 sesi upload = 1 dokumen)
             // filesArray berisi semua file dalam sesi itu
-            allFileSubmissionsCache.forEach(sub => {
+            filteredFile.forEach(sub => {
                 // Kumpulkan semua file dari dokumen ini
                 const files = [];
                 if (sub.filesArray && Array.isArray(sub.filesArray)) {
